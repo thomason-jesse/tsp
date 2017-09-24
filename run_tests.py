@@ -4,25 +4,11 @@ import os
 import sys
 import time
 
-tests = [('aish',
-          'python tests/aish/main.py tests/aish/ont.txt tests/aish/lex.txt tests/aish/samples.txt'),
-         ('templated_examples',
-          'python tests/templated_examples/main.py tests/templated_examples/ont.txt tests/templated_examples/lex.txt tests/templated_examples/10.txt'),
-         ('cky_parser_basics',
+tests = [('cky_parser_basics',
           'python tests/cky_parser_basics/main.py tests/cky_parser_basics/ont.txt \
           tests/cky_parser_basics/lex.txt tests/cky_parser_basics/samples.txt \
-          tests/cky_parser_basics/test.txt'),
-         ('grounding_recall',
-         'rosrun nlu_pipeline src/tests/grounding_recall/main.py tests/grounding_recall/ont.txt \
-          tests/grounding_recall/lex.txt tests/grounding_recall/samples.txt'),
-         ('action_grounding',
-         'rosrun nlu_pipeline src/tests/action_grounding/main.py tests/action_grounding/ont.txt \
-          tests/action_grounding/lex.txt tests/action_grounding/utterance_action_pairs.txt'),
-         ('navigation',
-          'python tests/navigation/main.py tests/navigation/ont.txt \
-          tests/navigation/lex.txt tests/navigation/samples.txt'),
-         ('merge_op',
-          'python tests/merge_op/main.py tests/merge_op/parser_1000 tests/merge_op/samples.txt')]
+          tests/cky_parser_basics/test.txt')
+         ]
 
 # read command line arguments
 tests_to_run = [t[0] for t in tests]
