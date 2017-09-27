@@ -1027,7 +1027,7 @@ class CKYParser:
 
     # yields next most likely pair of children from a given semantic root using production rule parameter scores
     def get_most_likely_children_from_root(self, n):
-        debug = False
+        debug = True
 
         if debug:
             print "get_most_likely_children_from_root: called on " + self.print_parse(n, True)
@@ -1061,7 +1061,7 @@ class CKYParser:
 
     # yields next most likely assignment of semantic values to ccg tree leaves
     def most_likely_semantic_leaves(self, tks, ccg_tree, known_root=None):
-        debug = False
+        debug = True
 
         # get syntax categories for tree leaves
         leaf_categories = []
@@ -1849,7 +1849,7 @@ class CKYParser:
 
     # given A1(A2), attempt to determine an A1, A2 that satisfy and return them
     def perform_reverse_fa(self, a):
-        debug = False
+        debug = True
         if debug:  # DEBUG
             _ = raw_input()  # DEBUG
 
@@ -1913,6 +1913,8 @@ class CKYParser:
                     arg_children_match = False
                 if arg_children_match:
                     add_and_abstraction = True
+                if debug:
+                    print "add_and_abstraction decision: " + str(add_and_abstraction)
 
             # create A1, A2 with A2 the predicate and children preserved, A1 abstracting A2 return type
             if pred.children is not None:
@@ -1935,6 +1937,9 @@ class CKYParser:
 
             # create pairs given directives
             for preserve_host_children, and_abstract in pairs_to_create:
+                if debug:
+                    print ("pairs_to_create next params: preserve_host_children " + str(preserve_host_children) +
+                           " with and_abstract " + str(and_abstract))
 
                 and_abstracts = [False]
                 if and_abstract:
@@ -1968,13 +1973,14 @@ class CKYParser:
                                     c.parent = p.children[c_idx]
                         if r.children is not None:
                             to_replace.extend([[r, idx, r.children[idx]] for idx in range(0, len(r.children))])
-                    # if debug:
-                    #     print "A1 before renumeration: "+self.print_parse(a1, True)  # DEBUG
+                    # print "A1 before renumeration: "+self.print_parse(a1, True)  # DEBUG
                     a1.set_return_type(self.ontology)
                     a2 = copy.deepcopy(pred)
                     if preserve_host_children:
                         a2.children = None
                     if aa:
+                        if debug:
+                            print "... producing an and-abstracted pair"
                         for c in a2.children:
                             c.children = None
                             c.set_return_type(self.ontology)

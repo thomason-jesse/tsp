@@ -1,26 +1,29 @@
-get a metal bottle for greg
+bring a light cylinder to justin
+M : bring(a(lambda 1:e.(and(light(1),cylinder(1)))),justin)
+
+get greg the metal bottle
 M : bring(a(lambda 1:e.(and(metal(1),bottle(1)))),greg)
 
-take a light yellow cylinder to peter
+walk to ray altpos office
+M : walk(a(lambda x:e.(and(office(x),possesses(ray,x)))))
+
+get the metal bottle for greg
+M : bring(a(lambda 1:e.(and(metal(1),bottle(1)))),greg)
+
+take the light yellow cylinder to peter
 M : bring(a(lambda 1:e.(and(and(light(1),yellow(1)),cylinder(1)))),peter)
-
-get greg a metal bottle
-M : bring(a(lambda 1:e.(and(metal(1),bottle(1)))),greg)
 
 take peter a light yellow cylinder
 M : bring(a(lambda 1:e.(and(and(light(1),yellow(1)),cylinder(1)))),peter)
 
-take the blue cylinder to dana
+take a blue cylinder to dana
 M : bring(a(lambda 1:e.(and(blue(1),cylinder(1)))),dana)
 
 go to ray 's office
 M : walk(a(lambda x:e.(and(office(x),possesses(ray,x)))))
 
-bring the heavy blue bottle to ray
+take the heavy blue bottle for ray
 M : bring(a(lambda 1:e.(and(and(heavy(1),blue(1)),bottle(1)))),ray)
-
-bring the light cylinder to justin
-M : bring(a(lambda 1:e.(and(light(1),cylinder(1)))),justin)
 
 walk to dana 's office
 M : walk(a(lambda x:e.(and(office(x),possesses(dana,x)))))
