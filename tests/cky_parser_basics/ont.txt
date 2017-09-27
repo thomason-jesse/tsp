@@ -25,7 +25,6 @@ location:<e,<e,t>>
 possesses:<e,<e,t>>
 a:<<e,t>,e>
 the:<<e,t>,e>
-and:<t,<t,t>>
 and_dec:<d,<d,d>>
 or:<t,<t,t>>
 or_e:<e,<e,e>>

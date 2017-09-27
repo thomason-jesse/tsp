@@ -341,31 +341,55 @@ class Lexicon:
 
         if not node.validate_tree_structure():
             sys.exit("ERROR: read in invalidly linked semantic node from string '"+s+"'")  # DEBUG
+
+        # Make a pass through the finished tree to find any * types and replace them with their functional use.
+        node = self.instantiate_wild_type(node)
+
         return node
 
-    def delete_semantic_form_for_surface_form(self, surface_form, ont_idx) :
-        if surface_form not in self.surface_forms :
+    # Makes a pass through the tree to replace allowed '*' with instantiated types
+    # Currently we only allow 'and' which goes from <*,<*,*>> to <ct,<ct,ct>> for ct the children return types
+    def instantiate_wild_type(self, root):
+        debug = False
+
+        if root.idx == self.ontology.preds.index('and'):
+            crta = self.ontology.compose_str_from_type(root.children[0].return_type)
+            crtb = self.ontology.compose_str_from_type(root.children[1].return_type)
+            if crta != crtb:
+                sys.exit("ERROR: 'and' taking children of different return types " +
+                         self.ontology.compose_str_from_type(crta) + ", " +
+                         self.ontology.compose_str_from_type(crtb))
+            root.type = self.ontology.read_type_from_str("<" + crta + ",<" + crta + "," + crta + ">>")
+            if debug:
+                print ("instantiate_wild_type: replaced 'and' type with " +
+                       self.ontology.compose_str_from_type(root.type))
+        if root.children is not None:
+            for cidx in range(len(root.children)):
+                root.children[cidx] = self.instantiate_wild_type(root.children[cidx])
+        return root
+
+    def delete_semantic_form_for_surface_form(self, surface_form, ont_idx):
+        if surface_form not in self.surface_forms:
             return
         matching_semantic_form = None
-        for semantic_form in self.semantic_forms :
-            if semantic_form.idx == ont_idx :
+        for semantic_form in self.semantic_forms:
+            if semantic_form.idx == ont_idx:
                 matching_semantic_form = semantic_form
                 break
-        if matching_semantic_form is None :
+        if matching_semantic_form is None:
             return
             
         sur_idx = self.surface_forms.index(surface_form)
         sem_idx = self.semantic_forms.index(matching_semantic_form)
         
-        if sur_idx in self.entries :
-            if sem_idx in self.entries[sur_idx] :
+        if sur_idx in self.entries:
+            if sem_idx in self.entries[sur_idx]:
                 self.entries[sur_idx].remove(sem_idx)
                 
-        if ont_idx in self.pred_to_surface :
-            if sur_idx in self.pred_to_surface[ont_idx] :
-                self.pred_to_surface.remove(sur_idx)
+        if ont_idx in self.pred_to_surface:
+            if sur_idx in self.pred_to_surface[ont_idx]:
+                del self.pred_to_surface[sur_idx]
                 
-        if sem_idx in self.reverse_entries :
-            if sur_idx in self.reverse_entries[sem_idx] :
+        if sem_idx in self.reverse_entries:
+            if sur_idx in self.reverse_entries[sem_idx]:
                 self.reverse_entries.remove(sur_idx)
-        

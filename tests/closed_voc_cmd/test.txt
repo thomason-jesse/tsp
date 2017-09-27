@@ -1,0 +1,5 @@
+report to peter 's office
+M : walk(a(lambda x:e.(and(office(x),possesses(peter,x)))))
+
+fetch a light metal cylinder for justin
+M : bring(a(lambda 1:e.(and(and(light(1),metal(1)),cylinder(1)))),justin)

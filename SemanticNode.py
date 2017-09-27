@@ -44,7 +44,7 @@ class SemanticNode:
             candidate_type = self.type
             for c in self.children:
                 c.set_return_type(ontology)
-                if ontology.types[candidate_type][0] == c.return_type:
+                if ontology.types_equal(ontology.types[candidate_type][0], c.return_type):
                     candidate_type = ontology.types[candidate_type][1]
                 else:
                     raise TypeError("Non-matching child type " +
@@ -118,10 +118,25 @@ class SemanticNode:
     # as long as the roots and children down are identical categories
 
     def equal_allowing_commutativity(self, other, commutative_idxs, ignore_syntax=True, ontology=None):
+        debug = False
+
         a = copy.deepcopy(self)
         b = copy.deepcopy(other)
         a.commutative_raise_node(commutative_idxs, ontology=ontology)
         b.commutative_raise_node(commutative_idxs, ontology=ontology)
+
+        if debug:
+            print a
+            if a.children is not None:  # DEBUG
+                print '\t' + str([str(c) for c in a.children])  # DEBUG
+                if a.children[0].children is not None:
+                    print '\t\t' + str([str(c) for c in a.children[0].children])  # DEBUG
+            print b
+            if b.children is not None:  # DEBUG
+                print '\t' + str([str(c) for c in b.children])  # DEBUG
+                if b.children[0].children is not None:
+                    print '\t\t' + str([str(c) for c in b.children[0].children])  # DEBUG
+
         return a.equal_ignoring_syntax(b, ignore_syntax=ignore_syntax)
 
     def commutative_raise_node(self, commutative_idxs, ontology=None):  # support function

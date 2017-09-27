@@ -8,7 +8,7 @@ class Ontology:
     def __init__(self, ont_fname):
 
         # subsequent entries are tuples of indices into this list defining a binary hierarchy
-        self.types = ['t', 'e', 'd', 'a', 'c']
+        self.types = ['*', 't', 'e', 'd', 'a', 'c']
 
         # get predicates and map from predicates to types
         self.preds, self.entries = self.read_sem_from_file(ont_fname)
@@ -34,8 +34,8 @@ class Ontology:
     # pred_name:<complex_type>
     def read_sem_from_file(self, fname):
 
-        preds = []
-        entries = []  # map of pred_idx:type read in
+        preds = ['and']
+        entries = [self.read_type_from_str('<*,<*,*>>', allow_wild=True)]  # map of pred_idx:type read in
         f = open(fname, 'r')
         for line in f.readlines():
 
@@ -46,26 +46,30 @@ class Ontology:
 
             # create semantic meaning representation from string
             [name, type_str] = line.split(':')
-            if name in preds: sys.exit("Multiply defined type for predicate '" + name + "'")
+            if name in preds:
+                sys.exit("Multiply defined type for predicate '" + name + "'")
             entries.append(self.read_type_from_str(type_str))
             preds.append(name)
         f.close()
         return preds, entries
 
-    # returns the index of self.types at which this type is stored; adds types to this list as necessary to compose such a type
-    def read_type_from_str(self, str):
+    # returns the index of self.types at which this type is stored; adds types to this list as necessary to
+    # compose such a type
+    def read_type_from_str(self, s, allow_wild=False):
 
         # a complex type
-        if str[0] == "<" and str[-1] == ">":
+        if s[0] == "<" and s[-1] == ">":
             d = 0
-            for split_idx in range(1, len(str) - 1):
-                if str[split_idx] == '<':
+            split_idx = None
+            for split_idx in range(1, len(s) - 1):
+                if s[split_idx] == '<':
                     d += 1
-                elif str[split_idx] == '>':
+                elif s[split_idx] == '>':
                     d -= 1
-                elif str[split_idx] == ',' and d == 0:
+                elif s[split_idx] == ',' and d == 0:
                     break
-            comp_type = [self.read_type_from_str(str[1:split_idx]), self.read_type_from_str(str[split_idx + 1:-1])]
+            comp_type = [self.read_type_from_str(s[1:split_idx], allow_wild=allow_wild),
+                         self.read_type_from_str(s[split_idx + 1:-1], allow_wild=allow_wild)]
             try:
                 return self.types.index(comp_type)
             except ValueError:
@@ -75,9 +79,12 @@ class Ontology:
         # a primitive type
         else:
             try:
-                return self.types.index(str)
+                t = self.types.index(s)
+                if not allow_wild and t == self.types.index('*'):
+                    sys.exit("The '*' type only has internal support.")
+                return t
             except ValueError:
-                sys.exit("Unrecognized primitive type '" + str + "'")
+                sys.exit("Unrecognized primitive type '" + s + "'")
 
     # returns a string representing the given ontological type
     def compose_str_from_type(self, t):
@@ -89,3 +96,14 @@ class Ontology:
         else:
             s += self.types[t]
         return s
+
+    # returns true if the given types are equivalent replacing '*' with matches
+    def types_equal(self, tidx, tjdx):
+        ti = self.types[tidx]
+        tj = self.types[tjdx]
+        if type(ti) is list and type(tj) is list:
+            if self.types_equal(ti[0], tj[0]) and self.types_equal(ti[1], tj[1]):
+                return True
+        elif tidx == tjdx or tidx == self.types.index('*') or tjdx == self.types.index('*'):
+            return True
+        return False
