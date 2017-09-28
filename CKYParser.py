@@ -433,6 +433,7 @@ class CKYParser:
         self.max_cky_trees_per_token_sequence_beam = 100  # for tokenization of an utterance, max cky trees considered
         self.max_hypothesis_categories_for_unknown_token_beam = 10  # for unknown token, max syntax categories tried
         self.max_expansions_per_non_terminal = 10  # decides how many expansions to store per CKY cell
+        self.lexicon_word_embedding_neighbors_to_consider = 3  # how many surface forms to consider as neighbors
         self.missing_lexicon_entry_given_token_penalty = -100  # additional log probability to lose for missing lex
         self.missing_CCG_given_token_penalty = -100  # additional log probability to lose for missing CCG
 
@@ -641,6 +642,34 @@ class CKYParser:
         if debug:
             print "number of token sequences for '"+s+"': "+str(len(tk_seqs))  # DEBUG
             print "tk_seqs: "+str(tk_seqs)  # DEBUG
+
+        # add lexical entries for unseen tokens based on nearest neighbors
+        for tk_seq in tk_seqs:
+            for tk in tk_seq:
+                if tk not in self.lexicon.surface_forms:
+                    nn = self.lexicon.get_lexicon_word_embedding_neighbors(
+                        tk, len(self.lexicon.surface_forms))  # self.lexicon_word_embedding_neighbors_to_consider)
+                    if len(nn) > 0:
+                        self.lexicon.surface_forms.append(tk)
+                        self.lexicon.entries.append([])
+                        sfidx = self.lexicon.surface_forms.index(tk)
+                        self.lexicon.neighbor_surface_forms.append(sfidx)
+                        for nsfidx, sim in nn:
+                            for sem_idx in self.lexicon.entries[nsfidx]:
+                                # adjust count so that sim 0.5 is the same as a missing entry
+                                # sim 1 is the same as no penalty (e.g. identical word)
+                                # sim 0 is twice as bad as treating entry as simply missing
+                                self.theta._lexicon_entry_given_token_counts[(sem_idx, sfidx)] = \
+                                    self.theta._lexicon_entry_given_token_counts[(sem_idx, nsfidx)] + \
+                                    ((self.missing_lexicon_entry_given_token_penalty * 2) * (1 - sim))
+                                self.lexicon.entries[sfidx].append(sem_idx)
+                                if debug:
+                                    print ("nearest neighbor expansion to '" + tk + "' includes that for " +
+                                           self.lexicon.surface_forms[nsfidx] + " :- " +
+                                           self.print_parse(self.lexicon.semantic_forms[sem_idx], True) +
+                                           " with initial penalized count " +
+                                           str(self.theta._lexicon_entry_given_token_counts[(sem_idx, sfidx)]))
+                                    _ = raw_input()  # DEBUG
 
         # calculate skip scores of each token in each sequence
         skip_scores = []
@@ -1089,7 +1118,7 @@ class CKYParser:
                 semantic_candidates.append([sem_idx for sem_idx
                                             in self.lexicon.entries[self.lexicon.surface_forms.index(exp)]
                                             if self.lexicon.semantic_forms[sem_idx].category == leaf_categories[idx]])
-            else:  # unknown surface form
+            else:  # unknown surface form with no semantic neighbors
                 # if the root is known, semantic candidates will be generated after the fact top-down
                 if known_root is not None:
                     semantic_candidates.append([])
@@ -1222,6 +1251,11 @@ class CKYParser:
             print "most_likely_ccg_parse_tree_given_tokens initialized with tks="+str(tks) + \
                 ", new_sense_leaf_limit="+str(new_sense_leaf_limit)  # DEBUG
             _ = raw_input()  # DEBUG
+
+        # TODO: could wrap this to initialize 'missing' structure with position spans to treat as missing
+        # TODO: despite thier having a lexicon entry to get new senses of words through top-down generation.
+        # TODO: initial pass would be same as code below; subsequent would use init_missing structure to
+        # TODO: allow [0, hyperparamter] positions to be left blank for generation
 
         # indexed by position in span (i, j) in parse tree
         # value is list of tuples [CCG category, [left key, left index], [right key, right index], score]

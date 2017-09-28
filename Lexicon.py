@@ -1,21 +1,60 @@
 __author__ = 'jesse'
 
+import gensim
+import numpy as np
 import sys
 import SemanticNode
 
 
 class Lexicon:
-    def __init__(self, ontology, lexicon_fname, allow_expanding_ont=False):
+    def __init__(self, ontology, lexicon_fname, allow_expanding_ont=False, word_embeddings_fn=None):
         self.ontology = ontology
         self.categories = []  # will grow on its own
         self.surface_forms, self.semantic_forms, self.entries, self.pred_to_surface = self.read_lex_from_file(
             lexicon_fname, allow_expanding_ont)
         self.reverse_entries = []
+        self.neighbor_surface_forms = []  # induced from embedding neighbors
         self.sem_form_expected_args = None
         self.sem_form_return_cat = None
         self.category_consumes = None
         self.generator_should_flush = False
         self.update_support_structures()
+        self.wv = self.load_word_embeddings(word_embeddings_fn)
+
+    def load_word_embeddings(self, fn):
+        if fn is not None:
+            wvb = True if fn.split('.')[-1] == 'bin' else False
+            wv = gensim.models.Word2Vec.load_word2vec_format(fn, binary=wvb, limit=50000)
+        else:
+            wv = None
+        return wv
+
+    # Return n nearest neighbors of w that are in the lexicon by cosine distance in the embedding vectors.
+    # Returns a tuple of size n (more if there are ties, less if fewer than n lexical entries)
+    # Tuples are valued (v, d) for v a lexicon surface form and d the cosine similarity scaled to [0, 1]
+    def get_lexicon_word_embedding_neighbors(self, w, n):
+        debug = False
+        if self.wv is None or w not in self.wv.vocab:
+            return []
+        # only use initial and generator-based lexical entries, not neighbor results since they're duplicates
+        candidate_neighbors = [sfidx for sfidx in range(len(self.surface_forms))
+                               if sfidx not in self.neighbor_surface_forms]
+        pred_cosine = [(1 + self.wv.similarity(w, self.surface_forms[vidx])) / 2.0
+                       if self.surface_forms[vidx] in self.wv.vocab else 0 for vidx in candidate_neighbors]
+        if max(pred_cosine) == 0:
+            return []
+        max_sims = [(i, x) for i, x in enumerate(pred_cosine)
+                    if np.isclose(x, np.max([pred_cosine[sidx] for sidx in candidate_neighbors]))]
+        top_k_sims = max_sims[:]
+        while len(top_k_sims) < n and len(top_k_sims) < len(candidate_neighbors):  # get top n
+            curr_max_val = np.max([pred_cosine[sidx] for sidx in candidate_neighbors
+                                   if sidx not in [p[0] for p in top_k_sims]])
+            top_k_sims.extend([(i, x) for i, x in enumerate(pred_cosine)
+                               if np.isclose(x, curr_max_val)])
+        if debug:
+            print ("get_lexicon_word_embedding_neighbors: top k sims '" + str(w) + "': " +
+                   ','.join([str((self.surface_forms[sidx], sim)) for sidx, sim in top_k_sims]))
+        return top_k_sims
 
     def update_support_structures(self):
         self.compute_pred_to_surface(self.pred_to_surface)

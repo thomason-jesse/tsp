@@ -14,7 +14,7 @@ print "types: " + str(ont.types)
 print "entries: " + str(ont.entries)
 
 print "reading in Lexicon"
-lex = Lexicon.Lexicon(ont, sys.argv[2])
+lex = Lexicon.Lexicon(ont, sys.argv[2], word_embeddings_fn=sys.argv[5] if len(sys.argv) == 6 else None)
 print "surface forms: " + str(lex.surface_forms)
 print "categories: " + str(lex.categories)
 print "semantic forms: " + str(lex.semantic_forms)
