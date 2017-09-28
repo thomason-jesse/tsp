@@ -8,8 +8,6 @@ import sys
 import ParseNode
 import SemanticNode
 
-from IPython import embed  # DEBUG
-
 neg_inf = float('-inf')
 random.seed(4)
 
@@ -1027,7 +1025,7 @@ class CKYParser:
 
     # yields next most likely pair of children from a given semantic root using production rule parameter scores
     def get_most_likely_children_from_root(self, n):
-        debug = True
+        debug = False
 
         if debug:
             print "get_most_likely_children_from_root: called on " + self.print_parse(n, True)
@@ -1061,7 +1059,7 @@ class CKYParser:
 
     # yields next most likely assignment of semantic values to ccg tree leaves
     def most_likely_semantic_leaves(self, tks, ccg_tree, known_root=None):
-        debug = True
+        debug = False
 
         # get syntax categories for tree leaves
         leaf_categories = []
@@ -1849,7 +1847,7 @@ class CKYParser:
 
     # given A1(A2), attempt to determine an A1, A2 that satisfy and return them
     def perform_reverse_fa(self, a):
-        debug = True
+        debug = False
         if debug:  # DEBUG
             _ = raw_input()  # DEBUG
 
@@ -1887,7 +1885,7 @@ class CKYParser:
             pred = curr
 
             # create A1, A2 with A2 the predicate without children, A1 abstracting A2 instances
-            pairs_to_create = [[True, False]]
+            pairs_to_create = [[True, False, False]]
 
             # check whether pred is 'and' and children arguments match, in which case additional abstraction
             # is possible
@@ -1933,49 +1931,106 @@ class CKYParser:
                         check_bound.extend(curr.children)
                 if not unbound_vars_in_pred:
                     pred.set_return_type(self.ontology)
-                    pairs_to_create.append([False, add_and_abstraction])
+                    pairs_to_create.append([False, add_and_abstraction, False])
+
+                # detect special case of 'and' children taking lambda instantiations as unary args themselves
+                # e.g. for a(x.(P)) taking and(p,q) -> a(x.(and(p(x),q(x))), a special case of FA distributing x
+                elif pred.idx == self.ontology.preds.index('and') and pred.children is not None:
+                    if debug:
+                        print "'and' abstraction has unbound_vars_in_pred=True for " + self.print_parse(pred, True)
+                    if pred.parent is not None and pred.parent.idx == self.ontology.preds.index('and'):
+                        if debug:
+                            print "... however, parent is 'and', so a higher nesting will handle this"
+                        parent_is_and = True
+                    else:
+                        parent_is_and = False
+                    and_children_are_l_inst = True
+                    ands_to_examine = [pred]
+                    while len(ands_to_examine) > 0:
+                        and_to_examine = ands_to_examine.pop()
+                        for c in and_to_examine.children:
+                            if c.idx == self.ontology.preds.index('and'):
+                                ands_to_examine.append(c)
+                            elif (c.is_lambda or c.children is None or len(c.children) != 1 or
+                                    not (c.children[0].is_lambda and not c.children[0].is_lambda_instantiation)):
+                                and_children_are_l_inst = False
+                                break
+                    if not parent_is_and and and_children_are_l_inst:
+                        if debug:
+                            print "'and' abstraction is special case of FA and will have children lambda args stripped"
+                        pairs_to_create.append([False, add_and_abstraction, True])
 
             # create pairs given directives
-            for preserve_host_children, and_abstract in pairs_to_create:
-                if debug:
-                    print ("pairs_to_create next params: preserve_host_children " + str(preserve_host_children) +
-                           " with and_abstract " + str(and_abstract))
+            for preserve_host_children, and_abstract, special_and_rule in pairs_to_create:
 
                 and_abstracts = [False]
                 if and_abstract:
                     and_abstracts.append(True)
                 for aa in and_abstracts:
-                    if preserve_host_children:
-                        lambda_type = pred.type
-                    elif aa:
-                        lambda_type = pred.children[0].type
-                    else:
-                        lambda_type = pred.return_type
-                    a1 = SemanticNode.SemanticNode(
-                        None, lambda_type, None, True, lambda_name=deepest_lambda+1, is_lambda_instantiation=True)
-                    a1.children = [copy.deepcopy(a)]
-                    a1.children[0].parent = a1
-                    to_replace = [[a1, 0, a1.children[0]]]
+
+                    if debug:
+                        print ("pairs_to_create next params: preserve_host_children " + str(preserve_host_children) +
+                               " with and_abstract " + str(and_abstract) + " and special_and_rule " +
+                               str(special_and_rule) + " and base pred " + self.print_parse(pred, True))
+
                     # TODO: this procedure replaces all instances of the identified predicate with lambdas
                     # TODO: in principle, however, should have candidates for all possible subsets of replacements
                     # TODO: eg. askperson(ray,ray) -> lambda x.askperson(x,x), lambda x.askperson(ray,x), etc
+
+                    a2 = copy.deepcopy(pred)
+                    a1_lambda_type = None
+
+                    # strip children from a2 and set return type to what would happen if they had not existed
+                    if special_and_rule:
+                        preserve_r = None
+                        ands_to_strip = [a2]
+                        ands_to_retype = [a2]
+                        while len(ands_to_strip) > 0:
+                            and_to_strip = ands_to_strip.pop()
+                            for c in and_to_strip.children:
+                                if c.idx == self.ontology.preds.index('and'):
+                                    ands_to_strip.append(c)
+                                    ands_to_retype.append(c)
+                                else:
+                                    if preserve_r is None:
+                                        preserve_r = c.type
+                                        a1_lambda_type = preserve_r
+                                    c.return_type = c.type
+                                    c.children = None
+                        # e.g. and<t,<t,t>>(p(x),q(x)) -> and<<e,t>,<<e,t>,<e,t>>>(p,q)
+                        ands_to_retype.reverse()
+                        for and_to_retype in ands_to_retype:
+                            and_to_retype.set_type_from_children_return_types(preserve_r, self.ontology)
+                            and_to_retype.return_type = self.ontology.types[and_to_retype.type][0]
+
+                    if preserve_host_children:
+                        a1_lambda_type = a2.type
+                    elif aa:
+                        a1_lambda_type = a2.children[0].type
+                    elif not special_and_rule:
+                        a1_lambda_type = a2.return_type
+
+                    a1 = SemanticNode.SemanticNode(
+                        None, a1_lambda_type, None, True, lambda_name=deepest_lambda+1, is_lambda_instantiation=True)
+                    a1.children = [copy.deepcopy(a)]
+                    a1.children[0].parent = a1
+
+                    to_replace = [[a1, 0, a1.children[0]]]
                     while len(to_replace) > 0:
                         p, c_idx, r = to_replace.pop()
-                        if not r.is_lambda and r.idx == pred.idx:
+                        if not r.is_lambda and r.idx == a2.idx:
                             lambda_instance = SemanticNode.SemanticNode(
-                                p, lambda_type, None, True, lambda_name=deepest_lambda+1,
+                                p, a1_lambda_type, None, True, lambda_name=deepest_lambda+1,
                                 is_lambda_instantiation=False)
                             p.children[c_idx].copy_attributes(
                                 lambda_instance, preserve_parent=True, preserve_children=preserve_host_children)
-                            if aa:
-                                p.children[c_idx].children = copy.deepcopy(pred.children[0].children)
+                            if aa and not special_and_rule:
+                                p.children[c_idx].children = copy.deepcopy(a2.children[0].children)
                                 for c in p.children[c_idx].children:
                                     c.parent = p.children[c_idx]
                         if r.children is not None:
                             to_replace.extend([[r, idx, r.children[idx]] for idx in range(0, len(r.children))])
                     # print "A1 before renumeration: "+self.print_parse(a1, True)  # DEBUG
-                    a1.set_return_type(self.ontology)
-                    a2 = copy.deepcopy(pred)
                     if preserve_host_children:
                         a2.children = None
                     if aa:
@@ -1993,6 +2048,33 @@ class CKYParser:
                             self.ontology.types.append(full_type)
                         a2.type = self.ontology.types.index(full_type)
                         a2.set_return_type(self.ontology)
+
+                    if special_and_rule:  # need to add a lambda instance to be consumed by a1
+                        if debug:
+                            print "adding lambda instance to bottom of a1=" + self.print_parse(a1, True)
+                        parent_finder = [a1.children[0]]
+                        scoped_type_match_lambda = None
+                        while len(parent_finder) > 0:
+                            curr_candidate = parent_finder.pop()
+                            if (curr_candidate.is_lambda_instantiation and
+                                    curr_candidate.type == self.ontology.types[a1.type][0]):
+                                scoped_type_match_lambda = curr_candidate.lambda_name
+                            if (scoped_type_match_lambda is not None and curr_candidate.is_lambda and
+                                    not curr_candidate.is_lambda_instantiation and
+                                    curr_candidate.lambda_name == a1.lambda_name):
+                                curr_candidate.children = [SemanticNode.SemanticNode(
+                                    curr_candidate, self.ontology.types[a1.type][0], None, True,
+                                    lambda_name=scoped_type_match_lambda,
+                                    is_lambda_instantiation=False)]
+                            elif curr_candidate.children is not None:
+                                parent_finder.extend(curr_candidate.children)
+                        if debug:
+                            print "... result a1=" + self.print_parse(a1, True)
+
+                    if debug:
+                        print "prenumerated a1 " + self.print_parse(a1, True)
+                        print "prenumerated a2 " + self.print_parse(a2, True)
+                    a1.set_return_type(self.ontology)
                     a1.renumerate_lambdas([])
                     a2.renumerate_lambdas([])
                     for d, cat in consumables:
@@ -2004,16 +2086,16 @@ class CKYParser:
                         if debug:
                             print "produced: "+self.print_parse(a1_with_cat, True)+" consuming " + \
                                 self.print_parse(a2_with_cat, True)+" in dir "+str(d)+" with params " + \
-                                ",".join([str(lambda_type), str(preserve_host_children), str(aa)])  # DEBUG
+                                ",".join([str(a1_lambda_type), str(preserve_host_children), str(aa)])  # DEBUG
                         if self.safety and not a1_with_cat.validate_tree_structure():
                             raise RuntimeError("ERROR: invalidly linked structure generated by reverse FA: " +
                                                self.print_parse(a1_with_cat, True) +
-                                               "with params "+",".join([str(lambda_type), str(preserve_host_children),
+                                               "with params "+",".join([str(a1_lambda_type), str(preserve_host_children),
                                                                         str(aa)]))
                         if self.safety and not a2_with_cat.validate_tree_structure():
                             raise RuntimeError("ERROR: invalidly linked structure generated by reverse FA: " +
                                                self.print_parse(a2_with_cat, True) +
-                                               "with params "+",".join([str(lambda_type), str(preserve_host_children),
+                                               "with params "+",".join([str(a1_lambda_type), str(preserve_host_children),
                                                                         str(aa)]))
 
         return candidate_pairs
