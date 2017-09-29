@@ -1,3 +1,15 @@
+skipnotitdict go to ray 's office
+M : walk(a(lambda x:e.(and(office(x),possesses(ray,x)))))
+
+skip go to ray 's office
+M : walk(a(lambda x:e.(and(office(x),possesses(ray,x)))))
+
+skip go to ray 's another office
+M : walk(a(lambda x:e.(and(office(x),possesses(ray,x)))))
+
+please go to skip ray 's another office
+M : walk(a(lambda x:e.(and(office(x),possesses(ray,x)))))
+
 take the light yellow cylinder to peter
 M : bring(a(lambda 1:e.(and(and(light(1),yellow(1)),cylinder(1)))),peter)
 

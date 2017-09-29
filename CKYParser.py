@@ -27,6 +27,7 @@ class Parameters:
         self._CCG_root_counts = {}
         self._lexicon_entry_given_token_counts = self.init_lexicon_entry(lexicon_weight)
         self._semantic_counts = {}
+        self._skipwords_given_surface_form = self.init_skipwords_given_surface_form(lexicon_weight)
 
         if debug:
             print "_CCG_given_token_counts: "+str(self._CCG_given_token_counts)  # DEBUG
@@ -42,6 +43,7 @@ class Parameters:
         self.CCG_root = {}
         self.lexicon_entry_given_token = {}
         self.semantic = {}
+        self.skipwords_given_surface_form = {}
 
         # update probabilities given new counts
         self.update_probabilities()
@@ -55,6 +57,14 @@ class Parameters:
     # update the probability tables given counts
     def update_probabilities(self):
         missing_entry_mass = 0
+
+        # skipwords just become heuristically less likely the more times they're used as skipwords correctly
+        # fixed penalty 0.5 for skipping word, adjusted based on count of skip/not skip based on
+        # p(skip_w | skip_w_count) = sigmoid(skip_w_count)
+        for sf_idx in self._skipwords_given_surface_form.keys():
+            self.skipwords_given_surface_form[sf_idx] = math.log(1 / (1 +
+                                                                      math.exp(
+                                                                          -self._skipwords_given_surface_form[sf_idx])))
 
         language_model_surface_forms = range(-1, len(self.lexicon.surface_forms))
         if self.use_language_model:
@@ -160,6 +170,11 @@ class Parameters:
                         self.semantic[key] = math.log((1+self._semantic_counts[key]-num_min) / mass) \
                             if mass > 0 else math.log(1.0 / len(nums))
 
+    # indexed by surface_forms_idx, value parameter weight
+    def init_skipwords_given_surface_form(self, lexicon_weight):
+        # initialize with negative lexicon weight because these words should -not- be rewarded for skipping
+        return {sf_idx: -lexicon_weight for sf_idx in range(len(self.lexicon.surface_forms))}
+
     # indexed by (categories idx, surface forms idx), value parameter weight
     def init_ccg_given_token(self, lexicon_weight):
         return {(self.lexicon.semantic_forms[sem_idx].category, sf_idx): lexicon_weight
@@ -259,7 +274,22 @@ class Parameters:
         debug = False
 
         # update counts given new training data
-        for x, y, z, y_lex, z_lex in t:
+        for x, y, z, y_lex, z_lex, y_skipped, z_skipped in t:
+
+            # update skips separately since they're weird
+            # (z_val - y_val) / (z_val + y_val)
+            for y_key in y_skipped:
+                if y_key not in z_skipped:
+                    y_sidx = self.lexicon.surface_forms.index(y_key)
+                    if y_sidx not in self._skipwords_given_surface_form:
+                        self._skipwords_given_surface_form[y_sidx] = 0
+                    self._skipwords_given_surface_form[y_sidx] -= 1  # should not have skipped
+            for z_key in z_skipped:
+                if z_key not in y_skipped:
+                    z_sidx = self.lexicon.surface_forms.index(z_key)
+                    if z_sidx not in self._skipwords_given_surface_form:
+                        self._skipwords_given_surface_form[z_sidx] = 0
+                    self._skipwords_given_surface_form[z_sidx] += 1  # should have skipped
 
             # expand parameter maps for new lexical entries and update parse structures
             # so that roots have correct surface form idxs (which may not have been assigned
@@ -433,7 +463,7 @@ class CKYParser:
         self.max_cky_trees_per_token_sequence_beam = 100  # for tokenization of an utterance, max cky trees considered
         self.max_hypothesis_categories_for_unknown_token_beam = 10  # for unknown token, max syntax categories tried
         self.max_expansions_per_non_terminal = 10  # decides how many expansions to store per CKY cell
-        self.lexicon_word_embedding_neighbors_to_consider = 3  # how many surface forms to consider as neighbors
+        self.max_new_skipwords_per_utterance = 1  # how many unknown skipwords to consider for a new utterance
         self.missing_lexicon_entry_given_token_penalty = -100  # additional log probability to lose for missing lex
         self.missing_CCG_given_token_penalty = -100  # additional log probability to lose for missing CCG
 
@@ -577,10 +607,12 @@ class CKYParser:
             correct_parse = None
             correct_new_lexicon_entries = []
             cky_parse_generator = self.most_likely_cky_parse(x, reranker_beam=reranker_beam, known_root=y)
-            chosen_parse, chosen_score, chosen_new_lexicon_entries = next(cky_parse_generator)
+            chosen_parse, chosen_score, chosen_new_lexicon_entries, chosen_skipped_surface_forms = \
+                next(cky_parse_generator)
             current_parse = chosen_parse
             correct_score = chosen_score
             current_new_lexicon_entries = chosen_new_lexicon_entries
+            current_skipped_surface_forms = chosen_skipped_surface_forms
             match = False
             first = True
             if chosen_parse is None:
@@ -592,6 +624,7 @@ class CKYParser:
                         current_parse.node, self.commutative_idxs, ontology=self.ontology):
                     correct_parse = current_parse
                     correct_new_lexicon_entries = current_new_lexicon_entries
+                    correct_skipped_surface_forms = current_skipped_surface_forms
                     if first:
                         match = True
                         num_matches += 1
@@ -599,7 +632,8 @@ class CKYParser:
                         num_trainable += 1
                     break
                 first = False
-                current_parse, correct_score, current_new_lexicon_entries = next(cky_parse_generator)
+                current_parse, correct_score, current_new_lexicon_entries, current_skipped_surface_forms = \
+                    next(cky_parse_generator)
             if correct_parse is None:
                 print "WARNING: could not find correct parse for '"+str(x)+"' during training"
                 num_fails += 1
@@ -607,6 +641,7 @@ class CKYParser:
             print "\tx: "+str(x)  # DEBUG
             print "\t\tchosen_parse: "+self.print_parse(chosen_parse.node, show_category=True)  # DEBUG
             print "\t\tchosen_score: "+str(chosen_score)  # DEBUG
+            print "\t\tchosen_skips: "+str(chosen_skipped_surface_forms)  # DEBUG
             if len(chosen_new_lexicon_entries) > 0:  # DEBUG
                 print "\t\tchosen_new_lexicon_entries: "  # DEBUG
                 for sf, sem in chosen_new_lexicon_entries:  # DEBUG
@@ -617,12 +652,14 @@ class CKYParser:
                 print "\ttraining example generated:"  # DEBUG
                 print "\t\tcorrect_parse: "+self.print_parse(correct_parse.node, show_category=True)  # DEBUG
                 print "\t\tcorrect_score: "+str(correct_score)  # DEBUG
+                print "\t\tcorrect_skips: " + str(correct_skipped_surface_forms)  # DEBUG
                 if len(correct_new_lexicon_entries) > 0:  # DEBUG
                     print "\t\tcorrect_new_lexicon_entries: "  # DEBUG
                     for sf, sem in correct_new_lexicon_entries:  # DEBUG
                         print "\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
                 print "\t\ty: "+self.print_parse(y, show_category=True)  # DEBUG
-                t.append([x, chosen_parse, correct_parse, chosen_new_lexicon_entries, correct_new_lexicon_entries])
+                t.append([x, chosen_parse, correct_parse, chosen_new_lexicon_entries, correct_new_lexicon_entries,
+                          chosen_skipped_surface_forms, correct_skipped_surface_forms])
         print "\tmatched "+str(num_matches)+"/"+str(len(d))  # DEBUG
         print "\ttrained "+str(num_trainable)+"/"+str(len(d))  # DEBUG
         print "\tgenlex only "+str(num_genlex_only)+"/"+str(len(d))  # DEBUG
@@ -638,95 +675,60 @@ class CKYParser:
         if len(s) == 0:
             raise AssertionError("Cannot parse provided string of length zero")
 
-        tk_seqs = self.tokenize(s)
+        tk_seq = self.tokenize(s)
         if debug:
-            print "number of token sequences for '"+s+"': "+str(len(tk_seqs))  # DEBUG
-            print "tk_seqs: "+str(tk_seqs)  # DEBUG
+            print "number of token sequences for '"+s+"': "+str(len(tk_seq))  # DEBUG
+            print "tk_seqs: "+str(tk_seq)  # DEBUG
 
         # add lexical entries for unseen tokens based on nearest neighbors
-        for tk_seq in tk_seqs:
-            for tk in tk_seq:
-                if tk not in self.lexicon.surface_forms:
-                    nn = self.lexicon.get_lexicon_word_embedding_neighbors(
-                        tk, len(self.lexicon.surface_forms))  # self.lexicon_word_embedding_neighbors_to_consider)
-                    if len(nn) > 0:
-                        self.lexicon.surface_forms.append(tk)
-                        self.lexicon.entries.append([])
-                        sfidx = self.lexicon.surface_forms.index(tk)
-                        self.lexicon.neighbor_surface_forms.append(sfidx)
-                        for nsfidx, sim in nn:
-                            for sem_idx in self.lexicon.entries[nsfidx]:
-                                # adjust count so that sim 0.5 is the same as a missing entry
-                                # sim 1 is the same as no penalty (e.g. identical word)
-                                # sim 0 is twice as bad as treating entry as simply missing
-                                self.theta._lexicon_entry_given_token_counts[(sem_idx, sfidx)] = \
-                                    self.theta._lexicon_entry_given_token_counts[(sem_idx, nsfidx)] + \
-                                    ((self.missing_lexicon_entry_given_token_penalty * 2) * (1 - sim))
-                                self.lexicon.entries[sfidx].append(sem_idx)
-                                if debug:
-                                    print ("nearest neighbor expansion to '" + tk + "' includes that for " +
-                                           self.lexicon.surface_forms[nsfidx] + " :- " +
-                                           self.print_parse(self.lexicon.semantic_forms[sem_idx], True) +
-                                           " with initial penalized count " +
-                                           str(self.theta._lexicon_entry_given_token_counts[(sem_idx, sfidx)]))
-                                    _ = raw_input()  # DEBUG
+        for tk in tk_seq:
+            if tk not in self.lexicon.surface_forms:
+                nn = self.lexicon.get_lexicon_word_embedding_neighbors(
+                    tk, len(self.lexicon.surface_forms))
+                if len(nn) > 0:
+                    self.lexicon.surface_forms.append(tk)
+                    self.lexicon.entries.append([])
+                    sfidx = self.lexicon.surface_forms.index(tk)
+                    self.lexicon.neighbor_surface_forms.append(sfidx)
+                    for nsfidx, sim in nn:
+                        for sem_idx in self.lexicon.entries[nsfidx]:
+                            # adjust count so that sim 0.5 is the same as a missing entry
+                            # sim 1 is the same as no penalty (e.g. identical word)
+                            # sim 0 is twice as bad as treating entry as simply missing
+                            self.theta._lexicon_entry_given_token_counts[(sem_idx, sfidx)] = \
+                                self.theta._lexicon_entry_given_token_counts[(sem_idx, nsfidx)] + \
+                                ((self.missing_lexicon_entry_given_token_penalty * 2) * (1 - sim))
+                            self.lexicon.entries[sfidx].append(sem_idx)
+                            if debug:
+                                print ("nearest neighbor expansion to '" + tk + "' includes that for " +
+                                       self.lexicon.surface_forms[nsfidx] + " :- " +
+                                       self.print_parse(self.lexicon.semantic_forms[sem_idx], True) +
+                                       " with initial penalized count " +
+                                       str(self.theta._lexicon_entry_given_token_counts[(sem_idx, sfidx)]))
 
-        # calculate skip scores of each token in each sequence
-        skip_scores = []
-        for tks in tk_seqs:
-            skip_score = {}
-            if len(tks) > 1:
-                for idx in range(0, len(tks)):
-                    if tks[idx] in self.lexicon.surface_forms:
-                        # TODO: should parameterize prior on surface forms
-                        skip_score[idx] = math.log((len(tks)-1)/float(len(tks)))
-                    else:
-                        skip_score[idx] = 0  # no penalty when skipping totally unknown tokens
-                        sub_tokens = tks[idx].split(' ')
-                        for st in sub_tokens:
-                            if st in self.lexicon.surface_forms:
-                                skip_score[idx] = math.log((len(tks)-1)/float(len(tks)))
-            skip_scores.append(skip_score)
-        if debug:
-            print "skip_scores: "+str(skip_scores)  # DEBUG
+        known_skips_in_utterance = sum([1 if tk in self.lexicon.surface_forms and
+                                        self.lexicon.surface_forms.index(tk)
+                                        in self.theta.skipwords_given_surface_form else 0
+                                        for tk in tk_seq])
 
-        skips_allowed = 0
-        while skips_allowed < 2:  # skip at most one token in a given sequence at a time
+        # TODO: actually, any amount of skipping that maximizes the expected score should be allowed
+        # TODO: and may increase computational tractability; instead, try choosing words to -consider-
+        # TODO: based on perceptron, greedily selecting ones that increase probability by more than/equal to 0.5
+        # TODO: in other words, should always try skipping words we've skipped before before trying to
+        # TODO: start parsing otherwise
+        for skips_allowed in range(known_skips_in_utterance + self.max_new_skipwords_per_utterance + 1):
 
             # calculate token sequence variations with number of skips allowed
-            tk_seqs_with_skips = []
-            for seq_idx in range(0, len(tk_seqs)):
-                # add an entry for each combination of skipped tokens ordered by score
-                ordered_skip_sequences = None
-                if skips_allowed == 0:
-                    ordered_skip_sequences = [tk_seqs[seq_idx][:]]
-                elif skips_allowed >= len(tk_seqs[seq_idx]):
-                    ordered_skip_sequences = []  # no valid subset of this sequence; all tokens would be skipped
-                elif skips_allowed == 1:
-                    skip_sequences = []
-                    for idx, score in sorted(skip_scores[seq_idx].items(), key=operator.itemgetter(1), reverse=True):
-                        skip_sequences.append([tk_seqs[seq_idx][t]
-                                              for t in range(0, len(tk_seqs[seq_idx]))
-                                              if t != idx])
-                    ordered_skip_sequences = skip_sequences
-                tk_seqs_with_skips.append(ordered_skip_sequences)
-
-            curr_tk_seqs = None
-            while curr_tk_seqs is None or len(curr_tk_seqs) > 0:
-
-                # pop first most likely skip from each possibility
-                curr_tk_seqs = []
-                for idx in range(0, len(tk_seqs)):
-                    if len(tk_seqs_with_skips[idx]) > 0:
-                        curr_tk_seqs.append(tk_seqs_with_skips[idx].pop(0))
-                if len(curr_tk_seqs) == 0:
-                    continue
+            skip_sequence_generator = self.get_token_skip_sequence(tk_seq, skips_allowed)
+            curr_tk_seq, score, skipped_surface_forms = next(skip_sequence_generator)
+            while curr_tk_seq is not None:
                 if debug:
-                    print "curr_tk_seqs: "+str(curr_tk_seqs)  # DEBUG
+                    print ("with skips_allowed " + str(skips_allowed) + " generated candidate sequence " +
+                           str(curr_tk_seq) + " with score " + str(score) + " skipping " + str(skipped_surface_forms))
+                    _ = raw_input()
 
                 # create generator for current sequence set and get most likely parses
-
-                ccg_parse_tree_generator = self.most_likely_ccg_parse_tree(curr_tk_seqs)
+                ccg_parse_tree_generator = self.most_likely_ccg_parse_tree([curr_tk_seq])
                 # get next most likely CCG parse tree out of CKY algorithm
                 ccg_tree, tree_score, tks = next(ccg_parse_tree_generator)
                 # ccg_tree indexed by spans (i, j) valued at [CCG category, left span, right span]
@@ -747,20 +749,37 @@ class CKYParser:
                                                                                reranker_beam, known_root=known_root)
                     parse_tree, parse_score, new_lexicon_entries = next(parse_tree_generator)
                     while parse_tree is not None:
-                        yield parse_tree, parse_score + tree_score, new_lexicon_entries
+                        yield parse_tree, score + parse_score + tree_score, new_lexicon_entries, skipped_surface_forms
                         parse_tree, parse_score, new_lexicon_entries = next(parse_tree_generator)
 
                     ccg_tree, tree_score, tks = next(ccg_parse_tree_generator)
 
+                curr_tk_seq, score, skipped_surface_forms = next(skip_sequence_generator)
+
             skips_allowed += 1
 
-            # if we know the root, we don't need to use skipping at all since we'll use generation techniques
-            # to fill in missing entries for training; so we break here
-            if known_root is not None:
-                break
-
         # out of parse trees to try
-        yield None, neg_inf, []
+        yield None, neg_inf, [], []
+
+    # yields the next most likely sequence of tokens allowing the specified number of skips k
+    # this is conditioned on the perceptron model's structure for skipping known stopwords
+    # unknown stopwords may be skipped at no penalty
+    def get_token_skip_sequence(self, tks, k):
+        if k == 0:
+            yield tks, 0, []
+        else:
+            skip_score = {idx: self.theta.skipwords_given_surface_form[self.lexicon.surface_forms.index(tks[idx])]
+                          if tks[idx] in self.lexicon.surface_forms and self.lexicon.surface_forms.index(tks[idx])
+                          in self.theta.skipwords_given_surface_form else math.log(0.5)
+                          for idx in range(len(tks))}
+            for idx, score in sorted(skip_score.items(), key=operator.itemgetter(1), reverse=True):
+                _tks = [tks[jdx] for jdx in range(len(tks)) if jdx != idx]
+                _gen = self.get_token_skip_sequence(_tks, k - 1)
+                _skip_tks, _score, _ssf = next(_gen)
+                while _skip_tks is not None:
+                    yield _skip_tks, score + _score, [tks[idx]] + _ssf
+                    _skip_tks, _score, _ssf = next(_gen)
+        yield None, None, None
 
     # yields the next most likely parse tree after re-ranking in beam k
     # searches over leaf assignments in beam given a leaf assignment generator
@@ -1568,8 +1587,8 @@ class CKYParser:
     # return A(B); A must be lambda headed with type equal to B's root type
     def perform_fa(self, a, b, renumerate=True):
         debug = False
-        if debug:  # DEBUG
-            _ = raw_input()  # DEBUG
+        # if debug:  # DEBUG
+        #     _ = raw_input()  # DEBUG
 
         if self.safety:
             if not a.validate_tree_structure():  # DEBUG
@@ -1654,7 +1673,11 @@ class CKYParser:
                                                   self.type_raised[self.lexicon.semantic_forms.index(c_obj)]])
                             raised = True
                         b_new.children[i] = self.perform_fa(c_obj, curr.children[0], renumerate=False)
-                        b_new.children[i].increment_lambdas(inc=deepest_lambda)
+                        if b.idx != self.ontology.preds.index('and'):
+                            # don't increment if special FA(3) invoked
+                            # ^ this rule is new as of adding 'and' special rules and may in general break something
+                            # so, watch out!
+                            b_new.children[i].increment_lambdas(inc=deepest_lambda)
                         b_new.children[i].parent = curr
                         b_new.children[i].set_return_type(self.ontology)
                     if curr.parent.is_lambda_instantiation:  # eg. 1(2) taking and(pred,pred) -> and(pred(2),pred(2)
@@ -2137,4 +2160,4 @@ class CKYParser:
     # given a string, return the set of possible tokenizations of that string given lexical entries
     def tokenize(self, s):
         str_parts = s.split()
-        return [str_parts]
+        return str_parts

@@ -38,7 +38,7 @@ for [x, y] in d:
     parse_generator = parser.most_likely_cky_parse(x, reranker_beam=10)
     correct = False
     for i in range(0, 10):  # to pass, need to get correct parse in a beam of 10 tries
-        best, score, _ = next(parse_generator)
+        best, score, _, _ = next(parse_generator)
         language_score = parser.get_language_model_score(best)
         if best is None:
             raise AssertionError("Testing failed on example '"+x+"' for which no more parses remain")
