@@ -15,15 +15,15 @@ print "types: " + str(ont.types)
 print "entries: " + str(ont.entries)
 
 print "reading in Lexicon"
-lex = Lexicon.Lexicon(ont, sys.argv[2])
+lex = Lexicon.Lexicon(ont, sys.argv[2], word_embeddings_fn=sys.argv[5])
 print "surface forms: " + str(lex.surface_forms)
 print "categories: " + str(lex.categories)
 print "semantic forms: " + str(lex.semantic_forms)
 print "entries: " + str(lex.entries)
 
 print "instantiating CKYParser"
-parser = CKYParser.CKYParser(ont, lex, lexicon_weight=1)
-parser.max_multiword_expression = 2
+parser = CKYParser.CKYParser(ont, lex, lexicon_weight=100)
+parser.max_multiword_expression = 1
 
 print "reading in data and beginning training test"
 d = parser.read_in_paired_utterance_semantics(sys.argv[3])

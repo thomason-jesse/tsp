@@ -14,14 +14,14 @@ print "types: " + str(ont.types)
 print "entries: " + str(ont.entries)
 
 print "reading in Lexicon"
-lex = Lexicon.Lexicon(ont, sys.argv[2], word_embeddings_fn=sys.argv[5] if len(sys.argv) == 6 else None)
+lex = Lexicon.Lexicon(ont, sys.argv[2], word_embeddings_fn=sys.argv[5])
 print "surface forms: " + str(lex.surface_forms)
 print "categories: " + str(lex.categories)
 print "semantic forms: " + str(lex.semantic_forms)
 print "entries: " + str(lex.entries)
 
 print "instantiating CKYParser"
-parser = CKYParser.CKYParser(ont, lex, lexicon_weight=1)
+parser = CKYParser.CKYParser(ont, lex, lexicon_weight=100)
 parser.allow_merge = False
 parser.max_multiword_expression = 1
 
