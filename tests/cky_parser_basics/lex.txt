@@ -5,6 +5,7 @@ walk :- M/PP : lambda x:e.(walk(x))
 
 # 'to' as recipient argument of a command (eg. ``bring coffee to peter'')
 to :- PP/NP : lambda x:e.(x)
+for :- PP/NP : lambda x:e.(x)
 
 # basic declarative constructions
 is :- D/NP\NP : lambda x:e.(lambda y:e.(declare_equal(x, y)))

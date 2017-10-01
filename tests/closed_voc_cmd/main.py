@@ -21,13 +21,14 @@ print "semantic forms: " + str(lex.semantic_forms)
 print "entries: " + str(lex.entries)
 
 print "instantiating CKYParser"
-parser = CKYParser.CKYParser(ont, lex, lexicon_weight=100)
+parser = CKYParser.CKYParser(ont, lex, lexicon_weight=10)
 parser.allow_merge = False
 parser.max_multiword_expression = 1
+parser.max_missing_words_to_try = 0
 
 print "reading in data and beginning training test"
 d = parser.read_in_paired_utterance_semantics(sys.argv[3])
-converged = parser.train_learner_on_semantic_forms(d, 10, reranker_beam=10)
+converged = parser.train_learner_on_semantic_forms(d, 20, reranker_beam=10)
 if not converged:
     raise AssertionError("Training failed to converge to correct values.")
 

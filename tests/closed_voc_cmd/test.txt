@@ -4,5 +4,5 @@ M : walk(a(lambda x:e.(and(office(x),possesses(peter,x)))))
 fetch a light metal cylinder for justin
 M : bring(a(lambda 1:e.(and(and(light(1),metal(1)),cylinder(1)))),justin)
 
-please get a yellow bottle for ray
-M : bring(a(lambda 1:e.(and(metal(1),bottle(1)))),ray)
+please get a yellow bottle skip for ray
+M : bring(a(lambda 1:e.(and(yellow(1),bottle(1)))),ray)

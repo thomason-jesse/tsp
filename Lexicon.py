@@ -137,13 +137,15 @@ class Lexicon:
         if type(self.categories[idx]) is str:
             return self.categories[idx]
         s = self.compose_str_from_category(self.categories[idx][0])
-        if type(self.categories[self.categories[idx][0]]) is not str: s = '(' + s + ')'
+        if type(self.categories[self.categories[idx][0]]) is not str:
+            s = '(' + s + ')'
         if self.categories[idx][1] == 0:
             s += '\\'
         else:
             s += '/'
         s2 = self.compose_str_from_category(self.categories[idx][2])
-        if type(self.categories[self.categories[idx][2]]) is not str: s2 = '(' + s2 + ')'
+        if type(self.categories[self.categories[idx][2]]) is not str:
+            s2 = '(' + s2 + ')'
         return s + s2
 
     def get_semantic_forms_for_surface_form(self, surface_form):

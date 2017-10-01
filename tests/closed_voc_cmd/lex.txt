@@ -9,6 +9,7 @@ walk :- M/PP : lambda x:e.(walk(x))
 
 # 'to' as recipient argument of a command (eg. ``bring coffee to peter'')
 to :- PP/NP : lambda x:e.(x)
+for :- PP/NP : lambda x:e.(x)
 
 # for "bob 's office"; "the office of the chair"
 's :- NP/N\NP : lambda x:e.(lambda P:<e,t>.(a(lambda y:e.(and(P(y), possesses(x, y))))))

@@ -274,6 +274,8 @@ class Parameters:
     def update_learned_parameters(self, t):
         debug = False
 
+        lr = 1.0 / math.sqrt(len(t))
+
         # update counts given new training data
         for x, y, z, y_lex, z_lex, y_skipped, z_skipped in t:
 
@@ -286,7 +288,7 @@ class Parameters:
                     y_sidx = self.lexicon.surface_forms.index(y_key)
                     if y_sidx not in self._skipwords_given_surface_form:
                         self._skipwords_given_surface_form[y_sidx] = 0
-                    self._skipwords_given_surface_form[y_sidx] -= 1  # should not have skipped
+                    self._skipwords_given_surface_form[y_sidx] -= lr  # should not have skipped
             for z_key in z_skipped:
                 if z_key not in y_skipped:
                     if z_key not in self.lexicon.surface_forms:
@@ -295,7 +297,7 @@ class Parameters:
                     z_sidx = self.lexicon.surface_forms.index(z_key)
                     if z_sidx not in self._skipwords_given_surface_form:
                         self._skipwords_given_surface_form[z_sidx] = 0
-                    self._skipwords_given_surface_form[z_sidx] += 1  # should have skipped
+                    self._skipwords_given_surface_form[z_sidx] += lr  # should have skipped
 
             # expand parameter maps for new lexical entries and update parse structures
             # so that roots have correct surface form idxs (which may not have been assigned
@@ -361,7 +363,7 @@ class Parameters:
                     if z_key not in parameter_structures[i]:
                         parameter_structures[i][z_key] = 0
                     # formerly (z_val - y_val)  / (z_val + y_val)
-                    parameter_structures[i][z_key] += (z_val - y_val) / math.sqrt(len(t))
+                    parameter_structures[i][z_key] += lr * (z_val - y_val)
                 for y_key in y_keys:
                     if y_key in seen_keys:
                         continue
@@ -369,7 +371,7 @@ class Parameters:
                     z_val = 0
                     if y_key not in parameter_structures[i]:
                         parameter_structures[i][y_key] = 0
-                    parameter_structures[i][y_key] += (z_val - y_val) / math.sqrt(len(t))
+                    parameter_structures[i][y_key] += lr * (z_val - y_val)
 
         if debug:
             print "_token_given_token_counts: "+str(self._token_given_token_counts)  # DEBUG
@@ -470,7 +472,7 @@ class CKYParser:
         self.max_cky_trees_per_token_sequence_beam = 100  # for tokenization of an utterance, max cky trees considered
         self.max_hypothesis_categories_for_unknown_token_beam = 10  # for unknown token, max syntax categories tried
         self.max_expansions_per_non_terminal = 10  # decides how many expansions to store per CKY cell
-        self.max_new_skipwords_per_utterance = 1  # how many unknown skipwords to consider for a new utterance
+        self.max_new_skipwords_per_utterance = 2  # how many unknown skipwords to consider for a new utterance
         self.max_missing_words_to_try = 2  # how many words that have meanings already to sample for new meanings
         self.missing_lexicon_entry_given_token_penalty = -100  # additional log probability to lose for missing lex
         self.missing_CCG_given_token_penalty = -100  # additional log probability to lose for missing CCG
@@ -696,9 +698,10 @@ class CKYParser:
                     sfidx = self.lexicon.surface_forms.index(tk)
                     self.lexicon.neighbor_surface_forms.append(sfidx)
                     # TODO: this should probably be a helper function to Parameters
+                    # take on the skipwords score of nearest neighbor, adjusted towards 0 for similarity
                     if sfidx not in self.theta._skipwords_given_surface_form:
                         self.theta._skipwords_given_surface_form[sfidx] = \
-                            self.theta._skipwords_given_surface_form[nn[0][0]] * (1 - nn[0][1])
+                            self.theta._skipwords_given_surface_form[nn[0][0]] * nn[0][1]
                     for nsfidx, sim in nn:
                         for sem_idx in self.lexicon.entries[nsfidx]:
                             # adjust count so that sim 0.5 is the same as a missing entry
@@ -727,9 +730,10 @@ class CKYParser:
                                                                self.theta.skipwords_given_surface_form[
                                                                    self.lexicon.surface_forms.index(tk)])])
         skips_allowed = min(len(tk_seq) - 1, num_likely_skips + self.max_new_skipwords_per_utterance)
-        skip_sequence_generator = self.get_token_skip_sequence(tk_seq, skips_allowed, [])
+        considered_so_far = []
+        skip_sequence_generator = self.get_token_skip_sequence(tk_seq, skips_allowed, True,
+                                                               yielded_above_threshold=considered_so_far)
         curr_tk_seq, score, skipped_surface_forms = next(skip_sequence_generator)
-        considered_so_far = [curr_tk_seq]
         considering_below_heuristic = False
         while curr_tk_seq is not None:
             if debug:
@@ -738,9 +742,9 @@ class CKYParser:
                 _ = raw_input()
 
             # create generator for current sequence set and get most likely parses
-            ccg_parse_tree_generator = self.most_likely_ccg_parse_tree([curr_tk_seq])
+            ccg_parse_tree_generator = self.most_likely_ccg_parse_tree_given_tokens(curr_tk_seq)
             # get next most likely CCG parse tree out of CKY algorithm
-            ccg_tree, tree_score, tks = next(ccg_parse_tree_generator)
+            ccg_tree, tree_score = next(ccg_parse_tree_generator)
             # ccg_tree indexed by spans (i, j) valued at [CCG category, left span, right span]
             while ccg_tree is not None:
 
@@ -751,7 +755,7 @@ class CKYParser:
                             "," + str(ccg_tree[span][1]) + "," + str(ccg_tree[span][2]) + "]"  # DEBUG
 
                 # get next most likely assignment of semantics to given CCG categories
-                semantic_assignment_generator = self.most_likely_semantic_leaves(tks, ccg_tree,
+                semantic_assignment_generator = self.most_likely_semantic_leaves(curr_tk_seq, ccg_tree,
                                                                                  known_root=known_root)
 
                 # use discriminative re-ranking to pull next most likely cky parse given leaf generator
@@ -762,13 +766,15 @@ class CKYParser:
                     yield parse_tree, score + parse_score + tree_score, new_lexicon_entries, skipped_surface_forms
                     parse_tree, parse_score, new_lexicon_entries = next(parse_tree_generator)
 
-                ccg_tree, tree_score, tks = next(ccg_parse_tree_generator)
+                ccg_tree, tree_score = next(ccg_parse_tree_generator)
 
             curr_tk_seq, score, skipped_surface_forms = next(skip_sequence_generator)
-            if curr_tk_seq is not None:
-                considered_so_far.append(curr_tk_seq)
-            elif not considering_below_heuristic:
-                skip_sequence_generator = self.get_token_skip_sequence(tk_seq, skips_allowed, considered_so_far)
+            if curr_tk_seq is None and not considering_below_heuristic:
+                if debug:
+                    print ("exhausted heuristic skips; moving on to full enumeration with " +
+                           "considered_so_far=" + str(considered_so_far))
+                skip_sequence_generator = self.get_token_skip_sequence(tk_seq, skips_allowed, False,
+                                                                       yielded_above_threshold=considered_so_far)
                 curr_tk_seq, score, skipped_surface_forms = next(skip_sequence_generator)
                 considering_below_heuristic = True
 
@@ -776,40 +782,81 @@ class CKYParser:
         yield None, neg_inf, [], []
 
     # yields the next most likely sequence of tokens allowing up to k skips
-    def get_token_skip_sequence(self, tks, k, yielded_above_threshold):
+    def get_token_skip_sequence(self, tks, k, heuristic, yielded_above_threshold=None):
+        debug = False
+        if debug:
+            print "get_token_skip_sequence: " + str(tks) + ", " + str(k) + ", " + str(heuristic)
+
+        # get skip scores from parser parameters
+        initial_skip_threshold = math.log(0.5)
+        skip_score = {idx: self.theta.skipwords_given_surface_form[self.lexicon.surface_forms.index(tks[idx])]
+                      if tks[idx] in self.lexicon.surface_forms and self.lexicon.surface_forms.index(tks[idx])
+                      in self.theta.skipwords_given_surface_form else initial_skip_threshold
+                      for idx in range(len(tks))}
+
+        # if not allowed to skip anymore, just return given sequence at no penalty
         if k == 0:
             yield tks, 0, []
-        else:
-            skip_score = {idx: self.theta.skipwords_given_surface_form[self.lexicon.surface_forms.index(tks[idx])]
-                          if tks[idx] in self.lexicon.surface_forms and self.lexicon.surface_forms.index(tks[idx])
-                          in self.theta.skipwords_given_surface_form else math.log(0.5)
-                          for idx in range(len(tks))}
 
-            if len(yielded_above_threshold) == 0:
-                yielded_above_threshold = []  # remembers what we yielded when heuristically capping skips at 0.5
-                for idx, score in sorted(skip_score.items(), key=operator.itemgetter(1), reverse=True):
-                    if score >= math.log(0.5) or np.isclose(score, math.log(0.5)):
-                        _tks = [tks[jdx] for jdx in range(len(tks)) if jdx != idx]
-                        _gen = self.get_token_skip_sequence(_tks, k - 1, [])
-                        _skip_tks, _score, _ssf = next(_gen)
-                        while _skip_tks is not None:
-                            yield _skip_tks, score + _score, [tks[idx]] + _ssf
-                            yielded_above_threshold.append(_skip_tks)
-                            _skip_tks, _score, _ssf = next(_gen)
-                    else:
-                        break
-                yield tks, 0, []
+        # greedily yield every combination with up to k skips for tokens with skip probability greater than 0.5
+        # record tokens yielded to the given structure so that they can be skipped by later calls
+        elif heuristic:
 
-            # make a second pass and yield what remains
-            else:
-                for idx, score in sorted(skip_score.items(), key=operator.itemgetter(1), reverse=True):
+            if debug:
+                print ("get_token_skip_sequence: skip_score sort " +
+                       str(sorted(skip_score.items(), key=operator.itemgetter(1), reverse=True)))
+                print "get_token_skip_sequence: initial_skip_threshold=" + str(initial_skip_threshold)
+
+            for idx, score in sorted(skip_score.items(), key=operator.itemgetter(1), reverse=True):
+                if score >= initial_skip_threshold or np.isclose(score, initial_skip_threshold):
                     _tks = [tks[jdx] for jdx in range(len(tks)) if jdx != idx]
-                    _gen = self.get_token_skip_sequence(_tks, k - 1, yielded_above_threshold)
+                    _gen = self.get_token_skip_sequence(_tks, k - 1, True, yielded_above_threshold=None)
                     _skip_tks, _score, _ssf = next(_gen)
                     while _skip_tks is not None:
-                        if _skip_tks not in yielded_above_threshold:
-                            yield _skip_tks, score + _score, [tks[idx]] + _ssf
+                        if yielded_above_threshold is not None:
+                            yielded_above_threshold.append(_skip_tks)
+                        yield _skip_tks, score + _score, [tks[idx]] + _ssf
                         _skip_tks, _score, _ssf = next(_gen)
+                else:
+                    if debug:
+                        print "get_token_skip_sequence: no further scores above heuristic at this depth"
+                    break
+            if yielded_above_threshold is not None:
+                yielded_above_threshold.append(tks)
+            yield tks, 0, []
+
+        # enumerate remaining skips, ignoring those that have already been yielded according to given list
+        # yield the remaining skips in sorted sum order
+        else:
+
+            remaining_sequences = []
+            remaining_scores = []
+            remaining_skipped_surface_forms = []
+            # get sequences for lower k's beneath self
+            for idx, score in sorted(skip_score.items(), key=operator.itemgetter(1), reverse=True):
+                _tks = [tks[jdx] for jdx in range(len(tks)) if jdx != idx]
+                _gen = self.get_token_skip_sequence(_tks, k - 1, False,
+                                                    yielded_above_threshold=yielded_above_threshold)
+                _skip_tks, _score, _ssf = next(_gen)
+                while _skip_tks is not None:
+                    if _skip_tks not in yielded_above_threshold:
+                        remaining_sequences.append(_skip_tks)
+                        remaining_scores.append(score + _score)
+                        remaining_skipped_surface_forms.append([tks[idx]] + _ssf)
+                    _skip_tks, _score, _ssf = next(_gen)
+            # add self to remaining sequence list
+            if tks not in yielded_above_threshold:
+                remaining_sequences.append(tks)
+                remaining_scores.append(0)
+                remaining_skipped_surface_forms.append([])
+
+            if debug:
+                print ("get_token_skip_sequence: enumerated remaining " + str(len(remaining_sequences)) +
+                       " sequences; returning them by score total")
+            for idx in sorted(range(len(remaining_scores)), key=lambda _i: remaining_scores[_i], reverse=True):
+                yield remaining_sequences[idx], remaining_scores[idx], remaining_skipped_surface_forms[idx]
+
+        # explicitly indicate that the generator is empty
         yield None, None, None
 
     # yields the next most likely parse tree after re-ranking in beam k
@@ -1231,68 +1278,6 @@ class CKYParser:
                      for idx in range(0, len(spans))]
             yield nodes, score
 
-    # yields the next most likely ccg parse tree given a set of possible token sequences
-    # finds the best parse tree given each token sequence and returns in-order the one
-    # with the highest score
-    def most_likely_ccg_parse_tree(self, tk_seqs):
-        debug = False
-
-        ccg_parse_tree_generators = [self.most_likely_ccg_parse_tree_given_tokens(tks)
-                                     for tks in tk_seqs]
-        best_per_seq = [next(ccg_parse_tree_generators[idx])
-                        for idx in range(0, len(tk_seqs))]
-        leaf_sense_limits = [0 for _ in range(0, len(tk_seqs))]
-
-        # remove candidates for which we have no surface forms at all
-        while [None, neg_inf] in best_per_seq:
-            idx = best_per_seq.index([None, neg_inf])
-            del best_per_seq[idx]
-            del ccg_parse_tree_generators[idx]
-            del leaf_sense_limits[idx]
-            del tk_seqs[idx]
-
-        best_idx = 0
-        best_score = neg_inf
-        tied_idxs = [0]
-        while len(best_per_seq) > 0:
-            for idx in range(0, len(tk_seqs)):  # select the highest-scoring ccg parse(s)
-                if best_per_seq[idx][1] > best_score:
-                    best_idx = idx
-                    tied_idxs = [idx]
-                    best_score = best_per_seq[idx][1]
-                elif best_per_seq[idx][1] == best_score:
-                    tied_idxs.append(idx)
-            for idx in tied_idxs:  # among those tied in score, select ccg parse with most tokens (fewest multi-word)
-                if len(tk_seqs[idx]) > len(tk_seqs[best_idx]):
-                    best_idx = idx
-            if debug:
-                print "most_likely_ccg_parse_tree: yielding " + \
-                    str(best_per_seq[best_idx][0])+" with score "+str(best_score) + \
-                    " from tokens "+str(tk_seqs[best_idx])  # DEBUG
-            yield best_per_seq[best_idx][0], best_score, tk_seqs[best_idx]
-            candidate, score = next(ccg_parse_tree_generators[best_idx])
-            empty = True
-            if candidate is not None:
-                best_per_seq[best_idx] = [candidate, score]
-                empty = False
-            else:
-                if leaf_sense_limits[best_idx] < self.max_new_senses_per_utterance:
-                    leaf_sense_limits[best_idx] += 1
-                    ccg_parse_tree_generators[best_idx] = self.most_likely_ccg_parse_tree_given_tokens(
-                        tk_seqs[best_idx], new_sense_leaf_limit=leaf_sense_limits[best_idx])
-                    candidate, score = next(ccg_parse_tree_generators[best_idx])
-                    if candidate is not None:
-                        best_per_seq[best_idx] = [candidate, score]
-                        empty = False
-            if empty:
-                del best_per_seq[best_idx]
-                del ccg_parse_tree_generators[best_idx]
-                del leaf_sense_limits[best_idx]
-                del tk_seqs[best_idx]
-                best_idx = 0
-                tied_idxs = [0]
-        yield None, neg_inf, None
-
     # yields the next most likely ccg parse tree given a set of tokens
     def most_likely_ccg_parse_tree_given_tokens(self, tks, new_sense_leaf_limit=0):
         debug = False
@@ -1311,8 +1296,6 @@ class CKYParser:
         randomized_idxs = [-1] + randomized_idxs
         missing_tried_so_far = 0
         for init_missing_idx in randomized_idxs:
-            if missing_tried_so_far > self.max_missing_words_to_try:
-                break
 
             # indexed by position in span (i, j) in parse tree
             # value is list of tuples [CCG category, [left key, left index], [right key, right index], score]
@@ -1360,7 +1343,7 @@ class CKYParser:
                                 skip_this_missing_set = True
                                 break
             if skip_this_missing_set:
-                break
+                continue
 
             # assign sense leaves based on max entries
             for i in range(0, new_sense_leaf_limit):
@@ -1380,8 +1363,9 @@ class CKYParser:
 
             if debug:
                 print "init_missing_idx: " + str(init_missing_idx)
-                print "leaf chart: " + str(chart)  # DEBUG
-                print "leaf missing: " + str(missing)  # DEBUG
+                print "missing_tried_so_far: " + str(missing_tried_so_far)
+                print "leaf chart: " + str(chart)
+                print "leaf missing: " + str(missing)
                 _ = raw_input()  # DEBUG
 
             # populate chart for length 1 utterance
@@ -1530,6 +1514,10 @@ class CKYParser:
                     print "WARNING: beam search limit hit"  # DEBUG
                 pass
 
+            # stop repeating missing mask if we've hit the limit
+            if missing_tried_so_far == self.max_missing_words_to_try:
+                break
+
         # no parses left
         yield None, neg_inf
 
@@ -1538,7 +1526,7 @@ class CKYParser:
         debug = False
 
         if debug:
-            print "performing Merge with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True)+"'"  # DEBUG
+            print "performing Merge with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True)+"'"
 
         and_idx = self.ontology.preds.index('and')
 

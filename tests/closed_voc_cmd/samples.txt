@@ -37,6 +37,9 @@ M : bring(a(lambda 1:e.(and(and(light(1),yellow(1)),cylinder(1)))),peter)
 take a blue cylinder to dana
 M : bring(a(lambda 1:e.(and(blue(1),cylinder(1)))),dana)
 
+get a blue bottle to peter
+M : bring(a(lambda 1:e.(and(blue(1),bottle(1)))),peter)
+
 go to ray 's office
 M : walk(a(lambda x:e.(and(office(x),possesses(ray,x)))))
 
