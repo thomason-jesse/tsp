@@ -21,7 +21,7 @@ print "semantic forms: " + str(lex.semantic_forms)
 print "entries: " + str(lex.entries)
 
 print "instantiating CKYParser"
-parser = CKYParser.CKYParser(ont, lex, lexicon_weight=10)
+parser = CKYParser.CKYParser(ont, lex, lexicon_weight=1)
 parser.allow_merge = False
 parser.max_multiword_expression = 1
 parser.max_missing_words_to_try = 0
