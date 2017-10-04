@@ -1668,7 +1668,7 @@ class CKYParser:
         # thus, we need to give ab a lambda child for b to become
         if not a.is_lambda and a.children is None and b.is_lambda:
             ab = copy.deepcopy(a)
-            ab.children = [SemanticNode.SemanticNode(None, b.return_type, b.category,
+            ab.children = [SemanticNode.SemanticNode(ab, b.return_type, b.category,
                                                      True, lambda_name=b.lambda_name,
                                                      is_lambda_instantiation=False)]
             if debug:
