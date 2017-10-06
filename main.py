@@ -20,14 +20,16 @@ def main():
     max_epochs = FLAGS_max_epochs
     epochs_between_validations = FLAGS_epochs_between_validations
     allow_merge = True if FLAGS_allow_merge == 1 else False
-    assert max_epochs >= epochs_between_validations
+    perform_type_raising = True if FLAGS_perform_type_raising == 1 else False
+    verbose = FLAGS_verbose
+    assert validation_pairs_fn is None or max_epochs >= epochs_between_validations
 
     o = Ontology.Ontology(ontology_fn)
-    l = Lexicon.Lexicon(o, lexicon_fn, word_embeddings_fn=lexicon_embeddings)
-    p = CKYParser.CKYParser(o, l, lexicon_weight=1.0)
+    l = Lexicon.Lexicon(o, lexicon_fn, word_embeddings_fn=lexicon_embeddings,)
+    p = CKYParser.CKYParser(o, l, allow_merge=allow_merge,
+                            lexicon_weight=1.0, perform_type_raising=perform_type_raising)
 
     # hyperparameter adjustments
-    p.allow_merge = allow_merge
     p.max_multiword_expression = 1
     p.max_missing_words_to_try = 0  # basically disallows polysemy that isn't already present in lexicon
 
@@ -41,7 +43,7 @@ def main():
             print "validation accuracy at 1 for epoch " + str(epoch) + ": " + str(acc_at_1)
         converged = p.train_learner_on_semantic_forms(train_data, epochs=epochs_between_validations,
                                                       epoch_offset=epoch, reranker_beam=10,
-                                                      verbose=1)
+                                                      verbose=verbose)
         if converged:
             print "training converged after epoch " + str(epoch)
             break
@@ -82,10 +84,14 @@ if __name__ == '__main__':
                         help="word embeddings to look up novel words against those in the lexicon")
     parser.add_argument('--max_epochs', type=int, required=False, default=10,
                         help="maximum epochs to iterate over the training data")
-    parser.add_argument('--epochs_between_validations', type=int, required=False, default=2,
+    parser.add_argument('--epochs_between_validations', type=int, required=False, default=1,
                         help="how many epochs to run between validation tests")
     parser.add_argument('--allow_merge', type=int, required=False, default=1,
                         help="whether to allow the parser to use the merge operation")
+    parser.add_argument('--perform_type_raising', type=int, required=False, default=1,
+                        help="whether to type-raise bare nouns (requires <e,t> types)")
+    parser.add_argument('--verbose', type=int, required=False, default=1,
+                        help="the verbosity level during training in 0, 1, 2")
     args = parser.parse_args()
     for k, v in vars(args).items():
         globals()['FLAGS_%s' % k] = v

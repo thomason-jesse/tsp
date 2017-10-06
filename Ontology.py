@@ -14,10 +14,6 @@ class Ontology:
         # get predicates and map from predicates to types
         self.preds, self.entries = self.read_sem_from_file(ont_fname)
 
-        # set special UNK predicates the parser can assign to for parsing with unknowns in synonym detection
-        self.preds.append("UNK_E")
-        self.entries.append(self.types.index('e'))
-
         # calculate and store number of arguments each predicate takes (atoms take 0)
         self.num_args = [self.calc_num_pred_args(i) for i in range(0, len(self.preds))]
 

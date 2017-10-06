@@ -14,7 +14,7 @@ random.seed(4)
 
 
 class Parameters:
-    def __init__(self, ont, lex, use_language_model=False, lexicon_weight=1.0):
+    def __init__(self, ont, lex, allow_merge, use_language_model=False, lexicon_weight=1.0):
         debug = False
 
         self.ontology = ont
@@ -24,7 +24,7 @@ class Parameters:
         # get initial count data structures
         self._token_given_token_counts = {}
         self._CCG_given_token_counts = self.init_ccg_given_token(lexicon_weight)
-        self._CCG_production_counts = self.init_ccg_production(lexicon_weight)
+        self._CCG_production_counts = self.init_ccg_production(lexicon_weight, allow_merge)
         self._CCG_root_counts = {}
         self._lexicon_entry_given_token_counts = self.init_lexicon_entry(lexicon_weight)
         self._semantic_counts = {}
@@ -183,7 +183,7 @@ class Parameters:
                 for sem_idx in self.lexicon.entries[sf_idx]}
 
     # indexed by categories idxs (production, left, right), value parameter weight
-    def init_ccg_production(self, lexicon_weight):
+    def init_ccg_production(self, lexicon_weight, allow_merge):
         ccg_production = {}
         for cat_idx in range(0, len(self.lexicon.categories)):
 
@@ -199,7 +199,8 @@ class Parameters:
                 ccg_production[(cat_idx, l, r)] = lexicon_weight
 
             # add production rules of form X -> X X for X<>X=X (merge)
-            ccg_production[(cat_idx, cat_idx, cat_idx)] = lexicon_weight
+            if allow_merge:
+                ccg_production[(cat_idx, cat_idx, cat_idx)] = lexicon_weight
 
         return ccg_production
 
@@ -449,7 +450,8 @@ def count_ccg_surface_form_pairs(y):
 
 
 class CKYParser:
-    def __init__(self, ont, lex, use_language_model=False, lexicon_weight=1.0):
+    def __init__(self, ont, lex, use_language_model=False, lexicon_weight=1.0, perform_type_raising=True,
+                 allow_merge=True):
 
         # resources given on instantiation
         self.ontology = ont
@@ -458,16 +460,18 @@ class CKYParser:
 
         # type-raise bare nouns in lexicon
         self.type_raised = {}  # map from semantic form idx to their type-raised form idx
-        self.type_raise_bare_nouns()
+        if perform_type_raising:
+            self.type_raise_bare_nouns()
 
         # model parameter values
-        self.theta = Parameters(ont, lex, use_language_model=use_language_model, lexicon_weight=lexicon_weight)
+        self.theta = Parameters(ont, lex, allow_merge,
+                                use_language_model=use_language_model, lexicon_weight=lexicon_weight)
 
         # additional linguistic information and parameters
         # TODO: read this from configuration files or have user specify it on instantiation
-        self.allow_merge = True  # allows 'and' to merge to adjacent same-category nodes
+        self.allow_merge = allow_merge  # allows 'and' to merge to adjacent same-category nodes
         self.commutative_idxs = [self.ontology.preds.index('and')]  # can be expanded by users if there are more
-        self.max_multiword_expression = 2  # max span of a multi-word expression to be considered during tokenization
+        self.max_multiword_expression = 1  # max span of a multi-word expression to be considered during tokenization
         self.max_new_senses_per_utterance = 3  # max number of new word senses that can be induced on a training example
         self.max_cky_trees_per_token_sequence_beam = 100  # for tokenization of an utterance, max cky trees considered
         self.max_hypothesis_categories_for_unknown_token_beam = 10  # for unknown token, max syntax categories tried
@@ -910,6 +914,7 @@ class CKYParser:
         parse_roots, parse_leaves_keys = self.form_root_from_leaves(parse_leaves, ccg_tree)
         if debug:
             print "parse_roots: "+str([self.print_parse(p.node) for p in parse_roots])  # DEBUG
+            _ = raw_input()  # DEBUG
 
         # yield parse and total score (leaves+syntax) if structure matches
         # set of new lexical entries required is empty in this case
@@ -1044,7 +1049,7 @@ class CKYParser:
         while len(parse_leaves) > 1 and found_combination:
 
             if debug:
-                print "parse leaves: " + str(parse_leaves)  # DEBUG
+                print "parse leaves:"
                 for i in range(0, len(parse_leaves)):  # DEBUG
                     print str(i)+": " + self.print_parse(parse_leaves[i].node, show_category=True) \
                         if parse_leaves[i] is not None else str(None)  # DEBUG
@@ -1468,6 +1473,13 @@ class CKYParser:
 
                         if debug:
                             print "chart: "+str(chart)  # DEBUG
+                            for key in chart:
+                                print (str(key) + " " + str([_t for _t in tks[key[0]:key[1]]]) +
+                                       ":\n\t" + '\n\t'.join(
+                                    [self.lexicon.compose_str_from_category(chart[key][idx][0])
+                                     + " " + str(chart[key][idx][1]) + " " + str(chart[key][idx][2]) for idx in
+                                     range(len(chart[key]))]))
+                            _ = raw_input()
 
             if debug:
                 print "finished chart: "+str(chart)  # DEBUG
@@ -1565,6 +1577,19 @@ class CKYParser:
             innermost_outer_lambda.children[0].set_return_type(self.ontology)
             innermost_outer_lambda.children[0].children[0].parent = innermost_outer_lambda.children[0]
             innermost_outer_lambda.children[0].children[1].parent = innermost_outer_lambda.children[0]
+
+            ab.set_return_type(self.ontology)
+            ab.commutative_raise_node(self.commutative_idxs, self.ontology)
+
+            # Check whether we've duplicated lambda instantiations among children and remove one if so.
+            # This seems kind of kludgy but should handle adjectives being merged.
+            if len(ab.children) == 1 and ab.children[0].idx == and_idx:
+                if [c.lambda_name for c in ab.children[0].children].count(ab.lambda_name) > 1:
+                    for cidx in range(len(ab.children[0].children)):
+                        if ab.children[0].children[cidx].lambda_name == ab.lambda_name:
+                            del ab.children[0].children[cidx]
+                            break
+            ab.set_return_type(self.ontology)
         else:
             try:
                 a.set_return_type(self.ontology)
@@ -1590,8 +1615,9 @@ class CKYParser:
             ab.children[0].parent = ab
             ab.children[1].parent = ab
 
-        ab.set_return_type(self.ontology)
-        ab.commutative_raise_node(self.commutative_idxs, self.ontology)
+            ab.set_return_type(self.ontology)
+            ab.commutative_raise_node(self.commutative_idxs, self.ontology)
+
         if debug:
             print "performed Merge with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True) + \
                 "' to form '"+self.print_parse(ab, True)+"'"  # DEBUG
@@ -1831,22 +1857,29 @@ class CKYParser:
 
     # return true if A(B) is a valid for functional application
     def can_perform_fa(self, i, j, a, b):
+        debug = False
+        if debug:
+            print "can_perform_fa: considering " + str(self.print_parse(a)) + ", " + str(self.print_parse(b))
+
         if a is None or b is None:
-            # print "A or B is None"  # DEBUG
+            if debug:
+                print "A or B is None"  # DEBUG
             return False
         if a.category is None or type(self.lexicon.categories[a.category]) is not list or (
                 i - j > 0 and self.lexicon.categories[a.category][1] == 1) or (
                 i - j < 0 and self.lexicon.categories[a.category][1] == 0):
-            # print "B is left/right when A expects right/left"  # DEBUG
+            if debug:
+                print "A consumes nothing or B is left/right when A expects right/left"  # DEBUG
             return False  # B is left/right when A expects right/left
         if not a.is_lambda or not a.is_lambda_instantiation or a.type != b.return_type:
             if a.is_lambda_instantiation and a.children is None:  # DEBUG
                 raise RuntimeError("ERROR: found lambda with no children: "+str(self.print_parse(a)))
-            # print "A is not lambda instantiation or types are mismatched" + str(self.print_parse(a)) + \  # DEBUG
-            #     ", "+ str(self.print_parse(b))  # DEBUG
+            if debug:
+                print "A is not lambda instantiation or types are mismatched"
             return False
         if self.lexicon.categories[a.category][2] != b.category:
-            # print "B category does not match A expected consumption"  # DEBUG
+            if debug:
+                print "B category does not match A expected consumption"  # DEBUG
             return False  # B is not the input category A expects
         if a.parent is None and a.is_lambda and not a.is_lambda_instantiation:
             return True  # the whole tree of A will be replaced with the whole tree of B
