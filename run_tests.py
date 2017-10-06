@@ -7,7 +7,11 @@ import time
 tests = [('cky_parser_basics',
           'python tests/cky_parser_basics/main.py tests/cky_parser_basics/ont.txt \
           tests/cky_parser_basics/lex.txt tests/cky_parser_basics/samples.txt \
-          tests/cky_parser_basics/test.txt')
+          tests/cky_parser_basics/test.txt'),
+         ('closed_voc_cmd',
+          'python tests/closed_voc_cmd/main.py tests/closed_voc_cmd/ont.txt \
+          tests/closed_voc_cmd/lex.txt tests/closed_voc_cmd/samples.txt \
+          tests/closed_voc_cmd/test.txt /scratch/cluster/jesse/GoogleNews-vectors-negative300.bin')
          ]
 
 # read command line arguments

@@ -589,10 +589,11 @@ class CKYParser:
         return d
 
     # take in a data set D=(x,y) for x expressions and y correct semantic form and update CKYParser parameters
-    def train_learner_on_semantic_forms(self, d, epochs=10, reranker_beam=1):
+    def train_learner_on_semantic_forms(self, d, epochs=10, epoch_offset=0, reranker_beam=1, verbose=2):
         for e in range(0, epochs):
-            print "epoch " + str(e)  # DEBUG
-            t, failures = self.get_training_pairs(d, reranker_beam=reranker_beam)
+            if verbose >= 1:
+                print "epoch " + str(e + epoch_offset)  # DEBUG
+            t, failures = self.get_training_pairs(d, verbose, reranker_beam=reranker_beam)
             if len(t) == 0:
                 print "training converged at epoch " + str(e)
                 if failures == 0:
@@ -607,7 +608,7 @@ class CKYParser:
     # training pairs in t are of form (x, y_chosen, y_correct, chosen_lex_entries, correct_lex_entries)
     # k determines how many parses to get for re-ranking
     # beam determines how many cky_trees to look through before giving up on a given input
-    def get_training_pairs(self, d, reranker_beam=1):
+    def get_training_pairs(self, d, verbose, reranker_beam=1):
         t = []
         num_trainable = 0
         num_matches = 0
@@ -626,7 +627,8 @@ class CKYParser:
             match = False
             first = True
             if chosen_parse is None:
-                print "WARNING: could not find valid parse for '" + x + "' during training"  # DEBUG
+                if verbose >= 2:
+                    print "WARNING: could not find valid parse for '" + x + "' during training"  # DEBUG
                 num_fails += 1
                 continue
             while correct_parse is None and current_parse is not None:
@@ -645,35 +647,39 @@ class CKYParser:
                 current_parse, correct_score, current_new_lexicon_entries, current_skipped_surface_forms = \
                     next(cky_parse_generator)
             if correct_parse is None:
-                print "WARNING: could not find correct parse for '"+str(x)+"' during training"
+                if verbose >= 2:
+                    print "WARNING: could not find correct parse for '"+str(x)+"' during training"
                 num_fails += 1
                 continue
-            print "\tx: "+str(x)  # DEBUG
-            print "\t\tchosen_parse: "+self.print_parse(chosen_parse.node, show_category=True)  # DEBUG
-            print "\t\tchosen_score: "+str(chosen_score)  # DEBUG
-            print "\t\tchosen_skips: "+str(chosen_skipped_surface_forms)  # DEBUG
-            if len(chosen_new_lexicon_entries) > 0:  # DEBUG
-                print "\t\tchosen_new_lexicon_entries: "  # DEBUG
-                for sf, sem in chosen_new_lexicon_entries:  # DEBUG
-                    print "\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
+            if verbose >= 2:
+                print "\tx: "+str(x)  # DEBUG
+                print "\t\tchosen_parse: "+self.print_parse(chosen_parse.node, show_category=True)  # DEBUG
+                print "\t\tchosen_score: "+str(chosen_score)  # DEBUG
+                print "\t\tchosen_skips: "+str(chosen_skipped_surface_forms)  # DEBUG
+                if len(chosen_new_lexicon_entries) > 0:  # DEBUG
+                    print "\t\tchosen_new_lexicon_entries: "  # DEBUG
+                    for sf, sem in chosen_new_lexicon_entries:  # DEBUG
+                        print "\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
             if not match or len(correct_new_lexicon_entries) > 0:
                 if len(correct_new_lexicon_entries) > 0:
                     num_genlex_only += 1
-                print "\t\ttraining example generated:"  # DEBUG
-                print "\t\t\tcorrect_parse: "+self.print_parse(correct_parse.node, show_category=True)  # DEBUG
-                print "\t\t\tcorrect_score: "+str(correct_score)  # DEBUG
-                print "\t\t\tcorrect_skips: " + str(correct_skipped_surface_forms)  # DEBUG
-                if len(correct_new_lexicon_entries) > 0:  # DEBUG
-                    print "\t\t\tcorrect_new_lexicon_entries: "  # DEBUG
-                    for sf, sem in correct_new_lexicon_entries:  # DEBUG
-                        print "\t\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
-                print "\t\t\ty: "+self.print_parse(y, show_category=True)  # DEBUG
+                if verbose >= 2:
+                    print "\t\ttraining example generated:"  # DEBUG
+                    print "\t\t\tcorrect_parse: "+self.print_parse(correct_parse.node, show_category=True)  # DEBUG
+                    print "\t\t\tcorrect_score: "+str(correct_score)  # DEBUG
+                    print "\t\t\tcorrect_skips: " + str(correct_skipped_surface_forms)  # DEBUG
+                    if len(correct_new_lexicon_entries) > 0:  # DEBUG
+                        print "\t\t\tcorrect_new_lexicon_entries: "  # DEBUG
+                        for sf, sem in correct_new_lexicon_entries:  # DEBUG
+                            print "\t\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
+                    print "\t\t\ty: "+self.print_parse(y, show_category=True)  # DEBUG
                 t.append([x, chosen_parse, correct_parse, chosen_new_lexicon_entries, correct_new_lexicon_entries,
                           chosen_skipped_surface_forms, correct_skipped_surface_forms])
-        print "\tmatched "+str(num_matches)+"/"+str(len(d))  # DEBUG
-        print "\ttrained "+str(num_trainable)+"/"+str(len(d))  # DEBUG
-        print "\tgenlex only "+str(num_genlex_only)+"/"+str(len(d))  # DEBUG
-        print "\tfailed "+str(num_fails)+"/"+str(len(d))  # DEBUG
+        if verbose >= 1:
+            print "\tmatched "+str(num_matches)+"/"+str(len(d))  # DEBUG
+            print "\ttrained "+str(num_trainable)+"/"+str(len(d))  # DEBUG
+            print "\tgenlex only "+str(num_genlex_only)+"/"+str(len(d))  # DEBUG
+            print "\tfailed "+str(num_fails)+"/"+str(len(d))  # DEBUG
         return t, num_fails
 
     # yields the next most likely CKY parse of input string s

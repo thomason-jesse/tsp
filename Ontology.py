@@ -8,7 +8,8 @@ class Ontology:
     def __init__(self, ont_fname):
 
         # subsequent entries are tuples of indices into this list defining a binary hierarchy
-        self.types = ['*', 't', 'e', 'd', 'a', 'c']
+        # when reading in from the ontology, if a base type hasn't been seen before it will be added
+        self.types = ['*']
 
         # get predicates and map from predicates to types
         self.preds, self.entries = self.read_sem_from_file(ont_fname)
@@ -78,13 +79,12 @@ class Ontology:
 
         # a primitive type
         else:
-            try:
-                t = self.types.index(s)
-                if not allow_wild and t == self.types.index('*'):
-                    sys.exit("The '*' type only has internal support.")
-                return t
-            except ValueError:
-                sys.exit("Unrecognized primitive type '" + s + "'")
+            if s not in self.types:
+                self.types.append(s)
+            t = self.types.index(s)
+            if not allow_wild and t == self.types.index('*'):
+                sys.exit("The '*' type only has internal support.")
+            return t
 
     # returns a string representing the given ontological type
     def compose_str_from_type(self, t):
