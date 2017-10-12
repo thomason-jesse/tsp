@@ -14,6 +14,13 @@ class Ontology:
         # get predicates and map from predicates to types
         self.preds, self.entries = self.read_sem_from_file(ont_fname)
 
+        # store commutative predicates
+        self.commutative = []  # indexed in preds
+        for pidx in range(len(self.preds)):
+            if self.preds[pidx][0] == '*':
+                self.preds[pidx] = self.preds[pidx][1:]
+                self.commutative.append(pidx)
+
         # calculate and store number of arguments each predicate takes (atoms take 0)
         self.num_args = [self.calc_num_pred_args(i) for i in range(0, len(self.preds))]
 
@@ -29,9 +36,10 @@ class Ontology:
     # reads semantic atom/predicate declarations from a given file of format:
     # atom_name:type
     # pred_name:<complex_type>
+    # *commutative_pred_name:<complex_type>
     def read_sem_from_file(self, fname):
 
-        preds = ['and']
+        preds = ['*and']
         entries = [self.read_type_from_str('<*,<*,*>>', allow_wild=True)]  # map of pred_idx:type read in
         f = open(fname, 'r')
         for line in f.readlines():

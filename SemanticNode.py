@@ -117,13 +117,13 @@ class SemanticNode:
     # these are a forward comparisons, so two trees are considered equal if their roots have different parents,
     # as long as the roots and children down are identical categories
 
-    def equal_allowing_commutativity(self, other, commutative_idxs, ignore_syntax=True, ontology=None):
+    def equal_allowing_commutativity(self, other, ontology, ignore_syntax=True):
         debug = False
 
         a = copy.deepcopy(self)
         b = copy.deepcopy(other)
-        a.commutative_raise_node(commutative_idxs, ontology=ontology)
-        b.commutative_raise_node(commutative_idxs, ontology=ontology)
+        a.commutative_raise_node(ontology)
+        b.commutative_raise_node(ontology)
 
         if debug:
             print a
@@ -139,11 +139,11 @@ class SemanticNode:
 
         return a.equal_ignoring_syntax(b, ignore_syntax=ignore_syntax)
 
-    def commutative_raise_node(self, commutative_idxs, ontology=None):  # support function
+    def commutative_raise_node(self, ontology):  # support function
         to_expand = [self]
         while len(to_expand) > 0:
             curr = to_expand.pop()
-            if curr.idx in commutative_idxs:
+            if curr.idx in ontology.commutative:
                 new_c = []
                 if curr.children is not None:
                     for c in curr.children:
@@ -152,9 +152,9 @@ class SemanticNode:
                         nc.parent = curr
                     new_c = sorted(new_c, key=lambda node: node.idx)
                     curr.children = new_c
-                    if ontology is not None:
+                    if ontology.preds[curr.idx] == 'and':  # TODO: this is vestigal and gross; should work around it
                         curr.set_type_from_children_return_types(curr.children[0].return_type, ontology)
-            elif curr.children is not None:
+            if curr.children is not None:
                 to_expand.extend(curr.children)
 
     # given children, add types as necessary to make func take them and return r

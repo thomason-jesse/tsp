@@ -470,7 +470,6 @@ class CKYParser:
         # additional linguistic information and parameters
         # TODO: read this from configuration files or have user specify it on instantiation
         self.allow_merge = allow_merge  # allows 'and' to merge to adjacent same-category nodes
-        self.commutative_idxs = [self.ontology.preds.index('and')]  # can be expanded by users if there are more
         self.max_multiword_expression = 1  # max span of a multi-word expression to be considered during tokenization
         self.max_new_senses_per_utterance = 3  # max number of new word senses that can be induced on a training example
         self.max_cky_trees_per_token_sequence_beam = 100  # for tokenization of an utterance, max cky trees considered
@@ -636,8 +635,7 @@ class CKYParser:
                 num_fails += 1
                 continue
             while correct_parse is None and current_parse is not None:
-                if y.equal_allowing_commutativity(
-                        current_parse.node, self.commutative_idxs, ontology=self.ontology):
+                if y.equal_allowing_commutativity(current_parse.node, self.ontology):
                     correct_parse = current_parse
                     correct_new_lexicon_entries = current_new_lexicon_entries
                     correct_skipped_surface_forms = current_skipped_surface_forms
@@ -773,6 +771,8 @@ class CKYParser:
                                                                            reranker_beam, known_root=known_root)
                 parse_tree, parse_score, new_lexicon_entries = next(parse_tree_generator)
                 while parse_tree is not None:
+                    if debug:
+                        print "yielding tree: " + self.print_parse(parse_tree.node, True)  # DEBUG
                     yield parse_tree, score + parse_score + tree_score, new_lexicon_entries, skipped_surface_forms
                     parse_tree, parse_score, new_lexicon_entries = next(parse_tree_generator)
 
@@ -872,6 +872,7 @@ class CKYParser:
     # yields the next most likely parse tree after re-ranking in beam k
     # searches over leaf assignments in beam given a leaf assignment generator
     def most_likely_reranked_cky_parse(self, ccg_tree, semantic_assignment_generator, k, known_root=None):
+        debug = False
 
         # get up to top k candidates, allowing generation
         candidates = []  # list of trees
@@ -879,9 +880,11 @@ class CKYParser:
         new_lex = []  # new lexical entries associated with each
         for curr_leaves, curr_leaves_score in semantic_assignment_generator:
             curr_generator = self.most_likely_tree_generator(curr_leaves, ccg_tree, sem_root=known_root)
-            # print "curr_leaves: "+str([self.print_parse(cl.node, show_category=True) for cl in curr_leaves])  # DEBUG
+            if debug:
+                print "curr_leaves: "+str([self.print_parse(cl.node, show_category=True) for cl in curr_leaves])  # DEBUG
             for curr_tree, curr_new_lex in curr_generator:
-                # print "...added candidate"  # DEBUG
+                if debug:
+                    print "...added candidate"  # DEBUG
                 candidates.append(curr_tree)
                 scores.append(self.theta.get_semantic_score(curr_tree) + curr_leaves_score)
                 new_lex.append(curr_new_lex)
@@ -890,14 +893,17 @@ class CKYParser:
             if len(candidates) > k:
                 break
 
-        # print "reranker candidate parses:"  # DEBUG
-        # for idx in range(0, len(candidates)):  # DEBUG
-        #     print "candidate: "+self.print_parse(candidates[idx].node, show_category=True)  # DEBUG
-        #     print "\tscore: "+str(scores[idx])  # DEBUG
+        if debug:
+            print "reranker candidate parses:"  # DEBUG
+            for idx in range(0, len(candidates)):  # DEBUG
+                print "candidate: "+self.print_parse(candidates[idx].node, show_category=True)  # DEBUG
+                print "\tscore: "+str(scores[idx])  # DEBUG
 
         # yield remaining best candidates in order
         score_dict = {idx: scores[idx] for idx in range(0, len(scores))}
         for idx, score in sorted(score_dict.items(), key=operator.itemgetter(1), reverse=True):
+            if debug:
+                print "yielding highest-ranked candidate " + self.print_parse(candidates[idx].node, True)
             yield candidates[idx], score, new_lex[idx]
 
         # out of candidates
@@ -914,7 +920,8 @@ class CKYParser:
         parse_roots, parse_leaves_keys = self.form_root_from_leaves(parse_leaves, ccg_tree)
         if debug:
             print "parse_roots: "+str([self.print_parse(p.node) for p in parse_roots])  # DEBUG
-            _ = raw_input()  # DEBUG
+            if len(parse_roots) == 1:
+                _ = raw_input()  # DEBUG
 
         # yield parse and total score (leaves+syntax) if structure matches
         # set of new lexical entries required is empty in this case
@@ -971,8 +978,7 @@ class CKYParser:
                             match = False
                             break
                         if not candidate_parse_leaves[idx].node.equal_allowing_commutativity(topdown_leaves[idx].node,
-                                                                                             commutative_idxs=
-                                                                                             self.commutative_idxs):
+                                                                                             ontology=self.ontology):
                             if debug:
                                 print ("...... semantic mismatch; " +
                                        self.print_parse(candidate_parse_leaves[idx].node, True) + " != " +
@@ -1579,7 +1585,7 @@ class CKYParser:
             innermost_outer_lambda.children[0].children[1].parent = innermost_outer_lambda.children[0]
 
             ab.set_return_type(self.ontology)
-            ab.commutative_raise_node(self.commutative_idxs, self.ontology)
+            ab.commutative_raise_node(self.ontology)
 
             # Check whether we've duplicated lambda instantiations among children and remove one if so.
             # This seems kind of kludgy but should handle adjectives being merged.
@@ -1616,7 +1622,7 @@ class CKYParser:
             ab.children[1].parent = ab
 
             ab.set_return_type(self.ontology)
-            ab.commutative_raise_node(self.commutative_idxs, self.ontology)
+            ab.commutative_raise_node(self.ontology)
 
         if debug:
             print "performed Merge with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True) + \
@@ -1668,6 +1674,21 @@ class CKYParser:
         if debug:
             print "performing FA with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True)+"'"  # DEBUG
 
+        # Increment B's lambdas, if any, by the max of A's lambdas, to prevent namespace collisions.
+        max_a_lambda = 0
+        lambda_finder = [a]
+        while len(lambda_finder) > 0:
+            c = lambda_finder.pop()
+            if c.is_lambda and c.is_lambda_instantiation:
+                if max_a_lambda < c.lambda_name:
+                    max_a_lambda = c.lambda_name
+            if c.children is not None:
+                lambda_finder.extend(c.children)
+        b_inc = copy.deepcopy(b)
+        b_inc.increment_lambdas(inc=max_a_lambda)
+        if debug:
+            print "incremented b's lambdas to avoid namespace errors: " + self.print_parse(b_inc)  # DEBUG
+
         # if A is 'and', apply B to children
         if not a.is_lambda and self.ontology.preds[a.idx] == 'and':
             a_new = copy.deepcopy(a)
@@ -1681,15 +1702,15 @@ class CKYParser:
                     copy_obj.copy_attributes(self.lexicon.semantic_forms[
                                              self.type_raised[self.lexicon.semantic_forms.index(copy_obj)]],
                                              preserve_parent=True)
-                a_new.children[i] = self.perform_fa(copy_obj, b, renumerate=False)
+                a_new.children[i] = self.perform_fa(copy_obj, b_inc, renumerate=False)
                 a_new.children[i].set_return_type(self.ontology)
                 a_new.children[i].parent = a_new
             a_new.set_type_from_children_return_types(a_new.children[0].return_type, self.ontology)
             a_new.set_return_type(self.ontology)
             a_new.set_category(a_new.children[0].category)
-            a_new.commutative_raise_node(self.commutative_idxs, self.ontology)
+            a_new.commutative_raise_node(self.ontology)
             if debug:
-                print "performed FA(1) with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True) + \
+                print "performed FA(1) with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b_inc, True) + \
                     "' to form '"+self.print_parse(a_new, True)+"'"  # DEBUG
             if self.safety and not a_new.validate_tree_structure():
                 raise RuntimeError("ERROR: invalidly linked structure generated by FA: " +
@@ -1698,13 +1719,13 @@ class CKYParser:
 
         # if A is not 'and' but also not lambda-headed, we need to implicitly attach the child to all of a
         # thus, we need to give ab a lambda child for b to become
-        if not a.is_lambda and a.children is None and b.is_lambda:
+        if not a.is_lambda and a.children is None and b_inc.is_lambda:
             ab = copy.deepcopy(a)
-            ab.children = [SemanticNode.SemanticNode(ab, b.return_type, b.category,
-                                                     True, lambda_name=b.lambda_name,
+            ab.children = [SemanticNode.SemanticNode(ab, b_inc.return_type, b_inc.category,
+                                                     True, lambda_name=b_inc.lambda_name,
                                                      is_lambda_instantiation=False)]
             if debug:
-                print "performed FA(3) with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True) + \
+                print "performed FA(3) with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b_inc, True) + \
                     "' to form '"+self.print_parse(ab, True)+"'"  # DEBUG
             return ab
 
@@ -1724,15 +1745,15 @@ class CKYParser:
             # an instance of lambda_A to be replaced by B
             elif curr.is_lambda and not curr.is_lambda_instantiation and curr.lambda_name == a.lambda_name:
                 if debug:
-                    print "substituting '"+self.print_parse(b, True)+"' for '"+self.print_parse(curr, True) + \
+                    print "substituting '"+self.print_parse(b_inc, True)+"' for '"+self.print_parse(curr, True) + \
                         "' with lambda offset "+str(deepest_lambda)  # DEBUG
-                if (not b.is_lambda and self.ontology.preds[b.idx] == 'and'
-                        and curr.children is not None and b.children is not None):
+                if (not b_inc.is_lambda and self.ontology.preds[b_inc.idx] == 'and'
+                        and curr.children is not None and b_inc.children is not None):
                     if debug:
                         print "entering B substitution of curr taking curr's args"  # DEBUG
                     # if B is 'and', can preserve it and interleave A's children as arguments
                     raised = False
-                    b_new = copy.deepcopy(b)
+                    b_new = copy.deepcopy(b_inc)
                     for i in range(0, len(b_new.children)):
                         c = b_new.children[i]
                         c.parent = None
@@ -1743,7 +1764,7 @@ class CKYParser:
                                                   self.type_raised[self.lexicon.semantic_forms.index(c_obj)]])
                             raised = True
                         b_new.children[i] = self.perform_fa(c_obj, curr.children[0], renumerate=False)
-                        if b.idx != self.ontology.preds.index('and'):
+                        if b_inc.idx != self.ontology.preds.index('and'):
                             # don't increment if special FA(3) invoked
                             # ^ this rule is new as of adding 'and' special rules and may in general break something
                             # so, watch out!
@@ -1773,11 +1794,11 @@ class CKYParser:
                     if curr.children is None:
                         if debug:
                             print "...whole tree is instance"  # DEBUG
-                        curr.copy_attributes(b)  # instance is whole tree; add nothing more and loop will now exit
-                    elif b.children is None:
+                        curr.copy_attributes(b_inc)  # instance is whole tree; add nothing more and loop will now exit
+                    elif b_inc.children is None:
                         if debug:
                             print "...instance heads tree; preserve children taking B"
-                        curr.copy_attributes(b, deepest_lambda, preserve_children=True)
+                        curr.copy_attributes(b_inc, deepest_lambda, preserve_children=True)
                     else:
                         raise RuntimeError("Error: incompatible parentless, childed node A with childed node B")
                     entire_replacement = True
@@ -1791,35 +1812,42 @@ class CKYParser:
                             break
                     if curr.children is None:
                         if debug:
-                            print "...instance of B ("+self.print_parse(b)+") will preserve its children"  # DEBUG
+                            print "...instance of B ("+self.print_parse(b_inc)+") will preserve its children"  # DEBUG
                         # lambda instance is a leaf
-                        curr.parent.children[curr_parent_matching_idx].copy_attributes(b, deepest_lambda,
+                        curr.parent.children[curr_parent_matching_idx].copy_attributes(b_inc, deepest_lambda,
                                                                                        preserve_parent=True)
                         if not curr.parent.children[curr_parent_matching_idx].validate_tree_structure():  # DEBUG
                             raise RuntimeError("ERROR: copy operation produced invalidly linked tree " +
                                                self.print_parse(curr.parent.children[curr_parent_matching_idx], True))
                     else:
-                        if b.children is None:
+                        if b_inc.children is None:
                             if debug:
                                 print "...instance of B will keep children from A"  # DEBUG
-                            curr.parent.children[curr_parent_matching_idx].copy_attributes(b, deepest_lambda,
+                            curr.parent.children[curr_parent_matching_idx].copy_attributes(b_inc, deepest_lambda,
                                                                                            preserve_parent=True,
                                                                                            preserve_children=True)
                         else:
                             if debug:
                                 print "...instance of A and B have matching lambda headers to be merged"  # DEBUG
-                            b_without_lambda_headers = b
+                            b_without_lambda_headers = b_inc
                             lambda_types = {}
+                            if debug:
+                                print "finding lambda types in b=" + self.print_parse(b_inc)  # DEBUG
                             while (b_without_lambda_headers.is_lambda and
                                     b_without_lambda_headers.is_lambda_instantiation):
                                 lambda_types[b_without_lambda_headers.lambda_name] = b_without_lambda_headers.type
                                 b_without_lambda_headers = b_without_lambda_headers.children[0]
+                            if debug:
+                                print "lambda_types: " + str(lambda_types)  # DEBUG
                             a_trace = a
                             lambda_map = {}
-                            while len(lambda_types.keys()) > 0:
+                            while len(lambda_types.keys()) > 0:  # get keymap from types
                                 name_found = None
                                 for name in lambda_types:
                                     if lambda_types[name] == a_trace.type:
+                                        if debug:
+                                            print ("lambda type " + str(name) + " -> " + str(lambda_types[name]) +
+                                                   " matche trace type of " + self.print_parse(a_trace))
                                         lambda_map[name] = a_trace.lambda_name
                                         name_found = name
                                         break
@@ -1846,7 +1874,7 @@ class CKYParser:
         except TypeError as e:
             raise e
         ab.set_category(self.lexicon.categories[a.category][0])
-        ab.commutative_raise_node(self.commutative_idxs, self.ontology)
+        ab.commutative_raise_node(self.ontology)
         if debug:
             print "performed FA(2) with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True) + \
                 "' to form '"+self.print_parse(ab, True)+"'"  # DEBUG
