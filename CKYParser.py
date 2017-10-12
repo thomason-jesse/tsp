@@ -688,8 +688,7 @@ class CKYParser:
     # if the root of the tree is known (during supervised training, for example),
     # providing it as an argument to this method allows top-down generation
     # to find new lexical entries for surface forms not yet recognized
-    def most_likely_cky_parse(self, s, reranker_beam=1, known_root=None):
-        debug = False
+    def most_likely_cky_parse(self, s, reranker_beam=1, known_root=None, debug=False):
         if len(s) == 0:
             raise AssertionError("Cannot parse provided string of length zero")
 
@@ -1282,6 +1281,12 @@ class CKYParser:
 
         # yield the assignment tuples in order by score as lists of ParseNodes
         for assignment, score in sorted(scores.items(), key=operator.itemgetter(1), reverse=True):
+            if debug:
+                print ("most_likely_semantic_leaves: yielding assignments: " +
+                       str([self.print_parse(self.lexicon.semantic_forms[semantic_candidates[idx][assignment[idx]]])
+                            if assignment[idx] is not None and
+                            semantic_candidates[idx][assignment[idx]] is not None else str(None)
+                            for idx in range(len(assignment))]))
             nodes = [ParseNode.ParseNode(None,
                                          copy.deepcopy(self.lexicon.semantic_forms[
                                                        semantic_candidates[idx][assignment[idx]]])
