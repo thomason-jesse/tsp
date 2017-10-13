@@ -220,22 +220,13 @@ class Lexicon:
 
     def get_all_preds_from_semantic_form(self, node):
         node_preds = []
-        if not node.is_lambda: node_preds.append(node.idx)
-        if node.children is None: return node_preds
+        if not node.is_lambda:
+            node_preds.append(node.idx)
+        if node.children is None:
+            return node_preds
         for c in node.children:
             node_preds.extend(self.get_all_preds_from_semantic_form(c))
         return node_preds
-
-    def form_contains_DESC_predicate(self, node):
-        if not node.is_lambda:
-            for sem in self.semantic_forms:
-                if not sem.is_lambda and sem.idx == node.idx and sem.category == self.categories.index('DESC'):
-                    return True
-        if node.children is not None:
-            for c in node.children:
-                if self.form_contains_DESC_predicate(c):
-                    return True
-        return False
 
     def read_category_from_str(self, s):
         # detect whether (,) surrounding s and pop it out of them
