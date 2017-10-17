@@ -1077,9 +1077,9 @@ class CKYParser:
                     else:
                         root = None
                         if self.can_perform_fa(i, i+1, l, r):
-                            root = self.perform_fa(l, r)
+                            root = self.perform_fa(l, r, top_level_call=True)
                         elif self.can_perform_fa(i+1, i, r, l):
-                            root = self.perform_fa(r, l)
+                            root = self.perform_fa(r, l, top_level_call=True)
                         elif self.can_perform_merge(l, r):
                             root = self.perform_merge(l, r)
                         elif self.can_perform_merge(r, l):
@@ -1666,7 +1666,7 @@ class CKYParser:
         return True
 
     # return A(B); A must be lambda headed with type equal to B's root type
-    def perform_fa(self, a, b, renumerate=True):
+    def perform_fa(self, a, b, top_level_call=False, renumerate=True):
         debug = False
         # if debug:  # DEBUG
         #     _ = raw_input()  # DEBUG
@@ -1680,19 +1680,20 @@ class CKYParser:
             print "performing FA with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True)+"'"  # DEBUG
 
         # Increment B's lambdas, if any, by the max of A's lambdas, to prevent namespace collisions.
-        max_a_lambda = 0
-        lambda_finder = [a]
-        while len(lambda_finder) > 0:
-            c = lambda_finder.pop()
-            if c.is_lambda and c.is_lambda_instantiation:
-                if max_a_lambda < c.lambda_name:
-                    max_a_lambda = c.lambda_name
-            if c.children is not None:
-                lambda_finder.extend(c.children)
         b_inc = copy.deepcopy(b)
-        b_inc.increment_lambdas(inc=max_a_lambda)
-        if debug:
-            print "incremented b's lambdas to avoid namespace errors: " + self.print_parse(b_inc)  # DEBUG
+        if top_level_call:
+            max_a_lambda = 0
+            lambda_finder = [a]
+            while len(lambda_finder) > 0:
+                c = lambda_finder.pop()
+                if c.is_lambda and c.is_lambda_instantiation:
+                    if max_a_lambda < c.lambda_name:
+                        max_a_lambda = c.lambda_name
+                if c.children is not None:
+                    lambda_finder.extend(c.children)
+            b_inc.increment_lambdas(inc=max_a_lambda)
+            if debug:
+                print "incremented b's lambdas to avoid namespace errors: " + self.print_parse(b_inc)  # DEBUG
 
         # if A is 'and', apply B to children
         if not a.is_lambda and self.ontology.preds[a.idx] == 'and':
@@ -1768,7 +1769,15 @@ class CKYParser:
                             c_obj.copy_attributes(self.lexicon.semantic_forms[
                                                   self.type_raised[self.lexicon.semantic_forms.index(c_obj)]])
                             raised = True
-                        b_new.children[i] = self.perform_fa(c_obj, curr.children[0], renumerate=False)
+                        if not (curr.children[0].is_lambda and not curr.children[0].is_lambda_instantiation and
+                                c_obj.is_lambda and c_obj.is_lambda_instantiation and
+                                c_obj.lambda_name == curr.children[0].lambda_name):
+                            # this basically controls against a lambda consuming an 'and' whose children are a mix of
+                            # already-instantiated preds and raw preds, e.g. lambda x(P(x) consuming
+                            # and(lambda y(P1(y)), P2, P3), which should be -> lambda y(and(P1(y),P2(y),P3(y))
+                            b_new.children[i] = self.perform_fa(c_obj, curr.children[0], renumerate=False)
+                        else:  # so instead of consuming and renumerating wrong, we can just strip the lambda header
+                            b_new.children[i] = b_new.children[i].children[0]  # remove the extraneous instantiation
                         if b_inc.idx != self.ontology.preds.index('and'):
                             # don't increment if special FA(3) invoked
                             # ^ this rule is new as of adding 'and' special rules and may in general break something
@@ -1892,7 +1901,8 @@ class CKYParser:
     def can_perform_fa(self, i, j, a, b):
         debug = False
         if debug:
-            print "can_perform_fa: considering " + str(self.print_parse(a)) + ", " + str(self.print_parse(b))
+            print ("can_perform_fa: considering " + str(self.print_parse(a, True)) + ", " +
+                   str(self.print_parse(b, True)))
 
         if a is None or b is None:
             if debug:
@@ -1915,7 +1925,9 @@ class CKYParser:
                 print "B category does not match A expected consumption"  # DEBUG
             return False  # B is not the input category A expects
         if a.parent is None and a.is_lambda and not a.is_lambda_instantiation:
-            return True  # the whole tree of A will be replaced with the whole tree of B
+            if debug:
+                print "the whole tree of A will be replaced with the whole tree of B"
+            return True
         to_traverse = [b]
         b_lambda_context = []
         while len(to_traverse) > 0:
@@ -1925,14 +1937,19 @@ class CKYParser:
             else:
                 break
             to_traverse.extend(b.children)
+        if debug:
+            print "checking lambda value replacements with b_lambda_context: " + str(b_lambda_context)
         # return True if all instances of A lambda appear in lambda contexts identical to what B expects
         return self.lambda_value_replacements_valid(a.children[0], a.lambda_name, [], b,
                                                     b_lambda_context)
 
     def lambda_value_replacements_valid(self, a, lambda_name, a_lambda_context, b, b_lambda_context):
-        # print "checking whether '"+self.print_parse(A)+"' lambda "+str(lambda_name) + \
-        #       " instances can be replaced by '"+self.print_parse(B)+"' under contexts " + \
-        #       str(A_lambda_context)+","+str(B_lambda_context)  # DEBUG
+        debug = False
+        if debug:
+            print ("checking whether '"+self.print_parse(a)+"' lambda "+str(lambda_name) +
+                   " instances can be replaced by '"+self.print_parse(b)+"' under contexts " +
+                   str(a_lambda_context)+","+str(b_lambda_context))
+
         if a.is_lambda and a.is_lambda_instantiation:
             extended_context = a_lambda_context[:]
             extended_context.append(a.type)
