@@ -20,6 +20,7 @@ class Parameters:
         self.ontology = ont
         self.lexicon = lex
         self.use_language_model = use_language_model
+        self.lexicon_weight = lexicon_weight
 
         # get initial count data structures
         self._token_given_token_counts = {}
