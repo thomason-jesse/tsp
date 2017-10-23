@@ -44,16 +44,17 @@ class Lexicon:
         if max(pred_cosine) == 0:
             return []
         max_sims = [(i, x) for i, x in enumerate(pred_cosine)
-                    if np.isclose(x, np.max([pred_cosine[sidx] for sidx in candidate_neighbors]))]
+                    if np.isclose(x, np.max([pred_cosine[sidx] for sidx in range(len(candidate_neighbors))]))]
         top_k_sims = max_sims[:]
         while len(top_k_sims) < n and len(top_k_sims) < len(candidate_neighbors):  # get top n
-            curr_max_val = np.max([pred_cosine[sidx] for sidx in candidate_neighbors
+            curr_max_val = np.max([pred_cosine[sidx] for sidx in range(len(candidate_neighbors))
                                    if sidx not in [p[0] for p in top_k_sims]])
             top_k_sims.extend([(i, x) for i, x in enumerate(pred_cosine)
                                if np.isclose(x, curr_max_val)])
         if debug:
             print ("get_lexicon_word_embedding_neighbors: top k sims '" + str(w) + "': " +
-                   ','.join([str((self.surface_forms[sidx], sim)) for sidx, sim in top_k_sims]))
+                   ','.join([str((self.surface_forms[candidate_neighbors[sidx]], sim))
+                             for sidx, sim in top_k_sims]))
         return top_k_sims
 
     def update_support_structures(self):
