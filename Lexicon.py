@@ -7,11 +7,11 @@ import SemanticNode
 
 
 class Lexicon:
-    def __init__(self, ontology, lexicon_fname, allow_expanding_ont=False, word_embeddings_fn=None):
+    def __init__(self, ontology, lexicon_fname, word_embeddings_fn=None):
         self.ontology = ontology
         self.categories = []  # will grow on its own
-        self.surface_forms, self.semantic_forms, self.entries, self.pred_to_surface = self.read_lex_from_file(
-            lexicon_fname, allow_expanding_ont)
+        self.surface_forms, self.semantic_forms, self.entries, self.pred_to_surface = \
+            self.read_lex_from_file(lexicon_fname)
         self.reverse_entries = []
         self.neighbor_surface_forms = []  # induced from embedding neighbors
         self.sem_form_expected_args = None
@@ -167,20 +167,19 @@ class Lexicon:
             else:
                 return []
 
-    def read_lex_from_file(self, fname, allow_expanding_ont):
+    def read_lex_from_file(self, fname):
         surface_forms = []
         semantic_forms = []
         entries = []
         pred_to_surface = {}
         f = open(fname, 'r')
         lines = f.readlines()
-        self.expand_lex_from_strs(lines, surface_forms, semantic_forms, entries, pred_to_surface,
-                                  allow_expanding_ont=allow_expanding_ont)
+        self.expand_lex_from_strs(lines, surface_forms, semantic_forms, entries, pred_to_surface)
         f.close()
         return surface_forms, semantic_forms, entries, pred_to_surface
 
     def expand_lex_from_strs(
-            self, lines, surface_forms, semantic_forms, entries, pred_to_surface, allow_expanding_ont=False):
+            self, lines, surface_forms, semantic_forms, entries, pred_to_surface):
         for line_idx in range(0, len(lines)):
             line = lines[line_idx]
 
@@ -199,7 +198,7 @@ class Lexicon:
                 surface_forms.append(surface_form)
                 entries.append([])
                 
-            cat_idx, semantic_form = self.read_syn_sem(rhs, allow_expanding_ont=allow_expanding_ont)
+            cat_idx, semantic_form = self.read_syn_sem(rhs)
             try:
                 sem_idx = semantic_forms.index(semantic_form)
             except ValueError:
@@ -213,10 +212,10 @@ class Lexicon:
                 else:
                     pred_to_surface[pred] = [sur_idx]
 
-    def read_syn_sem(self, s, allow_expanding_ont=False):
+    def read_syn_sem(self, s):
         lhs, rhs = s.split(" : ")
         cat_idx = self.read_category_from_str(lhs.strip())
-        semantic_form = self.read_semantic_form_from_str(rhs.strip(), cat_idx, None, [], allow_expanding_ont)
+        semantic_form = self.read_semantic_form_from_str(rhs.strip(), cat_idx, None, [])
         return cat_idx, semantic_form
 
     def get_all_preds_from_semantic_form(self, node):
@@ -244,6 +243,7 @@ class Lexicon:
             # everything up to final unbound /,\ is output, category following is input
         p = 0
         fin_slash_idx = len(s) - 1
+        direction = None
         while fin_slash_idx >= 0:
             if s[fin_slash_idx] == ')':
                 p += 1
@@ -271,7 +271,7 @@ class Lexicon:
             self.categories.append(category)
         return idx
 
-    def read_semantic_form_from_str(self, s, category, parent, scoped_lambdas, allow_expanding_ont):
+    def read_semantic_form_from_str(self, s, category, parent, scoped_lambdas):
         # the node to be instantiated and returned
         s = s.strip()
 
@@ -317,21 +317,7 @@ class Lexicon:
                 try:
                     pred_idx = self.ontology.preds.index(pred)
                 except ValueError:
-                    if not allow_expanding_ont:
-                        sys.exit("Symbol not found within ontology or lambdas in scope: '" + pred + "'")
-                    else:
-                        # assume unknown predicates are of type <e,t> with entry pred :- DESC : pred
-                        pred_idx = len(self.ontology.preds)
-                        self.ontology.preds.append(pred)
-                        e_to_t_idx = self.ontology.types.index(
-                            [self.ontology.types.index('e'), self.ontology.types.index('t')])
-                        self.ontology.entries.append(e_to_t_idx)
-                        self.ontology.num_args.append(self.ontology.calc_num_pred_args(pred_idx))
-                        self.surface_forms.append(pred)
-                        self.semantic_forms.append(SemanticNode.SemanticNode(
-                            None, e_to_t_idx, self.categories.index('DESC'), False, idx=pred_idx))
-                        self.entries.append([len(self.semantic_forms)-1])
-                        self.update_support_structures()
+                    sys.exit("Symbol not found within ontology or lambdas in scope: '" + pred + "'")
                 node = SemanticNode.SemanticNode(parent, self.ontology.entries[pred_idx], category, False, idx=pred_idx)
 
             # remove scoping parens that enclose argument(s) to predicate (if atomic named lambda, may be empty)
@@ -364,7 +350,7 @@ class Lexicon:
                 e_cat = expected_child_cats[i - 1] if len(expected_child_cats) >= i else None
                 children.append(
                     self.read_semantic_form_from_str(
-                        str_remaining[splits[i-1] + 1:splits[i]], e_cat, node, scoped_lambdas[:], allow_expanding_ont))
+                        str_remaining[splits[i-1] + 1:splits[i]], e_cat, node, scoped_lambdas[:]))
             node.children = children
         try:
             node.set_return_type(self.ontology)
