@@ -473,16 +473,23 @@ class CKYParser:
         self.allow_merge = allow_merge  # allows 'and' to merge to adjacent same-category nodes
         self.max_multiword_expression = 1  # max span of a multi-word expression to be considered during tokenization
         self.max_new_senses_per_utterance = 3  # max number of new word senses that can be induced on a training example
-        self.max_cky_trees_per_token_sequence_beam = 100  # for tokenization of an utterance, max cky trees considered
+        self.max_cky_trees_per_token_sequence_beam = 16  # for tokenization of an utterance, max cky trees considered
         self.max_hypothesis_categories_for_unknown_token_beam = 10  # for unknown token, max syntax categories tried
         self.max_expansions_per_non_terminal = 10  # decides how many expansions to store per CKY cell
         self.max_new_skipwords_per_utterance = 2  # how many unknown skipwords to consider for a new utterance
         self.max_missing_words_to_try = 2  # how many words that have meanings already to sample for new meanings
         self.missing_lexicon_entry_given_token_penalty = -100  # additional log probability to lose for missing lex
         self.missing_CCG_given_token_penalty = -100  # additional log probability to lose for missing CCG
+        # how many consumptions to consider during reverse function application, or None for an exhaustive search
+        self.training_reverse_fa_beam = 16
+        self.max_skip_sequences_to_consider = 32  # total variations of skip sequences to consider per utterance
+        # topdown trees to consider during generation per sequence of tokens and ccg tree
+        self.training_max_topdown_trees_to_consider = 32
+        # semantic leaf assignments to consider when parsing a sequence of tokens
+        self.max_leaf_assignments_to_consider = 32
 
         # behavioral parameters
-        self.safety = True  # set to False once confident about node combination functions' correctness
+        self.safety = True  # set to False for deployment to speed up parser
 
         # cache
         self.cached_combinations = {}  # indexed by left, then right node, value at result
@@ -620,7 +627,8 @@ class CKYParser:
         for [x, y] in d:
             correct_parse = None
             correct_new_lexicon_entries = []
-            cky_parse_generator = self.most_likely_cky_parse(x, reranker_beam=reranker_beam, known_root=y)
+            cky_parse_generator = self.most_likely_cky_parse(x, reranker_beam=reranker_beam, known_root=y,
+                                                             reverse_fa_beam=self.training_reverse_fa_beam)
             chosen_parse, chosen_score, chosen_new_lexicon_entries, chosen_skipped_surface_forms = \
                 next(cky_parse_generator)
             current_parse = chosen_parse
@@ -688,7 +696,9 @@ class CKYParser:
     # if the root of the tree is known (during supervised training, for example),
     # providing it as an argument to this method allows top-down generation
     # to find new lexical entries for surface forms not yet recognized
-    def most_likely_cky_parse(self, s, reranker_beam=1, known_root=None, debug=False):
+    def most_likely_cky_parse(self, s, reranker_beam=1, known_root=None, reverse_fa_beam=None, debug=False):
+        debug = False
+        s = s.strip()
         if len(s) == 0:
             raise AssertionError("Cannot parse provided string of length zero")
 
@@ -742,7 +752,9 @@ class CKYParser:
                                                                yielded_above_threshold=considered_so_far)
         curr_tk_seq, score, skipped_surface_forms = next(skip_sequence_generator)
         considering_below_heuristic = False
-        while curr_tk_seq is not None:
+        skip_sequences_considered = 0
+        while curr_tk_seq is not None and skip_sequences_considered < self.max_skip_sequences_to_consider:
+            skip_sequences_considered += 1
             if debug:
                 print ("with skips_allowed " + str(skips_allowed) + " generated candidate sequence " +
                        str(curr_tk_seq) + " with score " + str(score) + " skipping " + str(skipped_surface_forms))
@@ -767,7 +779,8 @@ class CKYParser:
 
                 # use discriminative re-ranking to pull next most likely cky parse given leaf generator
                 parse_tree_generator = self.most_likely_reranked_cky_parse(ccg_tree, semantic_assignment_generator,
-                                                                           reranker_beam, known_root=known_root)
+                                                                           reranker_beam, known_root=known_root,
+                                                                           reverse_fa_beam=reverse_fa_beam)
                 parse_tree, parse_score, new_lexicon_entries = next(parse_tree_generator)
                 while parse_tree is not None:
                     if debug:
@@ -870,15 +883,21 @@ class CKYParser:
 
     # yields the next most likely parse tree after re-ranking in beam k
     # searches over leaf assignments in beam given a leaf assignment generator
-    def most_likely_reranked_cky_parse(self, ccg_tree, semantic_assignment_generator, k, known_root=None):
+    def most_likely_reranked_cky_parse(self, ccg_tree, semantic_assignment_generator, k, known_root=None,
+                                       reverse_fa_beam=None):
         debug = False
 
         # get up to top k candidates, allowing generation
         candidates = []  # list of trees
         scores = []  # list of scores after discriminative re-ranking
         new_lex = []  # new lexical entries associated with each
+        leaf_assignments_considered = 0
         for curr_leaves, curr_leaves_score in semantic_assignment_generator:
-            curr_generator = self.most_likely_tree_generator(curr_leaves, ccg_tree, sem_root=known_root)
+            leaf_assignments_considered += 1
+            if leaf_assignments_considered > self.max_leaf_assignments_to_consider:
+                break
+            curr_generator = self.most_likely_tree_generator(curr_leaves, ccg_tree, sem_root=known_root,
+                                                             reverse_fa_beam=reverse_fa_beam)
             if debug:
                 print "curr_leaves: "+str([self.print_parse(cl.node, show_category=True) for cl in curr_leaves])  # DEBUG
             for curr_tree, curr_new_lex in curr_generator:
@@ -911,7 +930,7 @@ class CKYParser:
     # yields the next most likely assignment of semantic values to ccg nodes
     # returns None if leaf assignments cannot propagate to root
     # returns None if no assignment to missing leaf entries will allow propagation to root
-    def most_likely_tree_generator(self, parse_leaves, ccg_tree, sem_root=None):
+    def most_likely_tree_generator(self, parse_leaves, ccg_tree, sem_root=None, reverse_fa_beam=None):
         debug = False
 
         if debug:
@@ -945,8 +964,13 @@ class CKYParser:
             topdown_tree_generator = self.get_most_likely_tree_from_root(top_down_chart[root_key],
                                                                          root_key,
                                                                          ccg_tree,
-                                                                         parse_leaves_keys)
+                                                                         parse_leaves_keys,
+                                                                         reverse_fa_beam=reverse_fa_beam)
+            topdown_trees_considered = 0
             for topdown_root, topdown_score in topdown_tree_generator:
+                topdown_trees_considered += 1
+                if topdown_trees_considered > self.training_max_topdown_trees_to_consider:
+                    break
 
                 if debug:
                     print ("... generated topdown leaves:\n\t" +
@@ -1104,7 +1128,7 @@ class CKYParser:
 
     # greedily yields the next most likely tree generated from given parse root
     # subject to the constraints of the ccg_tree and stopping upon reaching all known_leaf_keys
-    def get_most_likely_tree_from_root(self, parse_root, root_key, ccg_tree, known_leaf_keys):
+    def get_most_likely_tree_from_root(self, parse_root, root_key, ccg_tree, known_leaf_keys, reverse_fa_beam=None):
         debug = False
 
         if debug:
@@ -1118,7 +1142,8 @@ class CKYParser:
         else:
 
             # greedily take children with best score until we get a category match
-            children_generator = self.get_most_likely_children_from_root(parse_root.node)
+            children_generator = self.get_most_likely_children_from_root(parse_root.node,
+                                                                         reverse_fa_beam=reverse_fa_beam)
             for children, children_score in children_generator:
                 if debug:
                     print ("... produced children " + self.print_parse(children[0], True) +
@@ -1166,18 +1191,18 @@ class CKYParser:
                                    str(ccg_tree[root_key][1+c]))  # DEBUG
 
     # yields next most likely pair of children from a given semantic root using production rule parameter scores
-    def get_most_likely_children_from_root(self, n):
+    def get_most_likely_children_from_root(self, n, reverse_fa_beam=None):
         debug = False
 
         if debug:
             print "get_most_likely_children_from_root: called on " + self.print_parse(n, True)
 
-        candidate_pairs = self.perform_reverse_fa(n)
+        candidate_pairs = self.perform_reverse_fa(n, beam_limit=reverse_fa_beam)
         if self.can_perform_split(n):
             candidate_pairs.extend(self.perform_split(n))
 
         if debug:
-            print ("get_most_likely_children_from_root: candidate pairs " +
+            print ("get_most_likely_children_from_root: candidate pairs (" + str(len(candidate_pairs)) + ") " +
                    str([self.print_parse(p1, True) + " dir " + str(d) + " " + self.print_parse(p2, True)
                         for p1, d, p2 in candidate_pairs]))
 
@@ -2030,7 +2055,7 @@ class CKYParser:
         return True
 
     # given A1(A2), attempt to determine an A1, A2 that satisfy and return them
-    def perform_reverse_fa(self, a):
+    def perform_reverse_fa(self, a, beam_limit=None):
         debug = False
         if debug:  # DEBUG
             _ = raw_input()  # DEBUG
@@ -2061,7 +2086,10 @@ class CKYParser:
         candidate_pairs = []
         to_examine = [a]
         while len(to_examine) > 0:
-            curr = to_examine.pop()
+            if beam_limit is not None:  # if we're sampling, pop a random element
+                curr = to_examine.pop(random.randint(0, len(to_examine)-1))
+            else:
+                curr = to_examine.pop()
             if curr.children is not None:
                 to_examine.extend(curr.children)
             if curr.is_lambda:
@@ -2144,6 +2172,10 @@ class CKYParser:
                             print "'and' abstraction is special case of FA and will have children lambda args stripped"
                         pairs_to_create.append([False, add_and_abstraction, True])
 
+            # if we're using a beam limit, shuffle the order in which we sample pairs
+            if beam_limit is not None:
+                random.shuffle(pairs_to_create)
+
             # create pairs given directives
             for preserve_host_children, and_abstract, special_and_rule in pairs_to_create:
 
@@ -2155,7 +2187,8 @@ class CKYParser:
                     if debug:
                         print ("pairs_to_create next params: preserve_host_children " + str(preserve_host_children) +
                                " with and_abstract " + str(and_abstract) + " and special_and_rule " +
-                               str(special_and_rule) + " and base pred " + self.print_parse(pred, True))
+                               str(special_and_rule) + " and base pred " + self.print_parse(pred, True) +
+                               " and root a= " + self.print_parse(a, True))
 
                     # TODO: this procedure replaces all instances of the identified predicate with lambdas
                     # TODO: in principle, however, should have candidates for all possible subsets of replacements
@@ -2199,10 +2232,17 @@ class CKYParser:
                     a1.children = [copy.deepcopy(a)]
                     a1.children[0].parent = a1
 
+                    if debug:
+                        print "... base a1 before abstracting to-be-consumed values: " + self.print_parse(a1, True)
                     to_replace = [[a1, 0, a1.children[0]]]
                     while len(to_replace) > 0:
                         p, c_idx, r = to_replace.pop()
-                        if not r.is_lambda and r.idx == a2.idx:
+                        # if not r.is_lambda and r.idx == a2.idx:  # this condition is too weak
+                        if (not r.is_lambda and r.idx == a2.idx and
+                                r.equal_allowing_commutativity(a2, self.ontology)):
+                            if debug:
+                                print ("...... found child r " + self.print_parse(r) + " of parent p " +
+                                       self.print_parse(p) + " at index " + str(c_idx) + " to abstract away")
                             lambda_instance = SemanticNode.SemanticNode(
                                 p, a1_lambda_type, None, True, lambda_name=deepest_lambda+1,
                                 is_lambda_instantiation=False)
@@ -2214,7 +2254,7 @@ class CKYParser:
                                     c.parent = p.children[c_idx]
                         if r.children is not None:
                             to_replace.extend([[r, idx, r.children[idx]] for idx in range(0, len(r.children))])
-                    # print "A1 before renumeration: "+self.print_parse(a1, True)  # DEBUG
+
                     if preserve_host_children:
                         a2.children = None
                     if aa:
@@ -2281,7 +2321,13 @@ class CKYParser:
                                                self.print_parse(a2_with_cat, True) +
                                                "with params "+",".join([str(a1_lambda_type), str(preserve_host_children),
                                                                         str(aa)]))
+                        if beam_limit is not None and len(candidate_pairs) >= beam_limit:
+                            if debug:
+                                print "perform_reverse_fa: beam limit hit or exceeded; returning prematurely!"
+                            return candidate_pairs
 
+        if debug:
+            print "perform_reverse_fa: exhaustively found all " + str(len(candidate_pairs)) + " candidate pairs"
         return candidate_pairs
 
     # given a string, return the set of possible tokenizations of that string given lexical entries

@@ -42,7 +42,7 @@ def main():
             acc_at_1 = get_performance_on_pairs(p, val_data)
             print "validation accuracy at 1 for epoch " + str(epoch) + ": " + str(acc_at_1)
         converged = p.train_learner_on_semantic_forms(train_data, epochs=epochs_between_validations,
-                                                      epoch_offset=epoch, reranker_beam=10,
+                                                      epoch_offset=epoch, reranker_beam=1,
                                                       verbose=verbose)
         if converged:
             print "training converged after epoch " + str(epoch)
