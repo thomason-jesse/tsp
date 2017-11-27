@@ -32,14 +32,19 @@ class SemanticNode:
 
     # return own type if no children; output expected return value if children match; error out otherwise
     def set_return_type(self, ontology):
+        debug = False
         # lambdas 'return' <type,child_return_type> if consumed by upper functions
         if self.is_lambda_instantiation:
             type_str = ontology.compose_str_from_type(self.type)
             self.children[0].set_return_type(ontology)
             child_return_type_str = ontology.compose_str_from_type(self.children[0].return_type)
             self.return_type = ontology.read_type_from_str("<" + type_str + "," + child_return_type_str + ">")
+            if debug:
+                print "set_return_type: lambda instantiation set return"
         elif self.children is None:
             self.return_type = self.type  # leaf returns itself
+            if debug:
+                print "set_return_type: leaf set return"
         else:
             candidate_type = self.type
             for c in self.children:
@@ -52,6 +57,8 @@ class SemanticNode:
                                     ") for parent " + ontology.compose_str_from_type(candidate_type) + " (" +
                                     self.print_little() + ")")
             self.return_type = candidate_type
+            if debug:
+                print "set_return_type: set return by consuming children"
 
     # copy attributes of the given SemanticNode into this one (essentially, clone the second into this space)
     def copy_attributes(self, a, lambda_enumeration=0, lambda_map=None, preserve_parent=False, preserve_children=False):

@@ -379,8 +379,7 @@ class Lexicon:
             crtb = self.ontology.compose_str_from_type(root.children[1].return_type)
             if crta != crtb:
                 sys.exit("ERROR: 'and' taking children of different return types " +
-                         self.ontology.compose_str_from_type(crta) + ", " +
-                         self.ontology.compose_str_from_type(crtb))
+                         crta + ", " + crtb)
             root.type = self.ontology.read_type_from_str("<" + crta + ",<" + crta + "," + crta + ">>")
             if debug:
                 print ("instantiate_wild_type: replaced 'and' type with " +

@@ -580,6 +580,8 @@ class CKYParser:
 
     # read in data set of form utterance\nCCG : semantic_form\n\n...
     def read_in_paired_utterance_semantics(self, fname):
+        debug = True
+
         d = []
         f = open(fname, 'r')
         f_lines = f.readlines()
@@ -590,6 +592,8 @@ class CKYParser:
                 i += 1
                 continue
             input_str = f_lines[i].strip()
+            if debug:
+                print "processing parse for: '" + input_str + "'"
             ccg_str, form_str = f_lines[i+1].strip().split(" : ")
             ccg = self.lexicon.read_category_from_str(ccg_str)
             form = self.lexicon.read_semantic_form_from_str(form_str, None, None, [])
