@@ -4,6 +4,8 @@ import copy
 import math
 import numpy as np
 import operator
+import os
+import pickle
 import random
 import sys
 import ParseNode
@@ -603,11 +605,11 @@ class CKYParser:
         return d
 
     # take in a data set D=(x,y) for x expressions and y correct semantic form and update CKYParser parameters
-    def train_learner_on_semantic_forms(self, d, epochs=10, epoch_offset=0, reranker_beam=1, verbose=2):
+    def train_learner_on_semantic_forms(self, d, epochs=10, epoch_offset=0, reranker_beam=1, verbose=2, use_condor=False):
         for e in range(0, epochs):
             if verbose >= 1:
                 print "epoch " + str(e + epoch_offset)  # DEBUG
-            t, failures = self.get_training_pairs(d, verbose, reranker_beam=reranker_beam)
+            t, failures = self.get_training_pairs(d, verbose, reranker_beam=reranker_beam, use_condor=use_condor)
             if len(t) == 0:
                 print "training converged at epoch " + str(e)
                 if failures == 0:
@@ -620,75 +622,98 @@ class CKYParser:
 
     # take in data set d=(x,y) for x strings and y correct semantic forms and calculate training pairs
     # training pairs in t are of form (x, y_chosen, y_correct, chosen_lex_entries, correct_lex_entries)
-    # k determines how many parses to get for re-ranking
+    # verbose - 0, 1, or 2 in increasing order of verbosity
+    # reranker_beam - determines how many parses to get for re-ranking
     # beam determines how many cky_trees to look through before giving up on a given input
-    def get_training_pairs(self, d, verbose, reranker_beam=1):
-        t = []
-        num_trainable = 0
-        num_matches = 0
-        num_fails = 0
-        num_genlex_only = 0
-        for [x, y] in d:
-            correct_parse = None
-            correct_new_lexicon_entries = []
-            cky_parse_generator = self.most_likely_cky_parse(x, reranker_beam=reranker_beam, known_root=y,
-                                                             reverse_fa_beam=self.training_reverse_fa_beam)
-            chosen_parse, chosen_score, chosen_new_lexicon_entries, chosen_skipped_surface_forms = \
-                next(cky_parse_generator)
-            current_parse = chosen_parse
-            correct_score = chosen_score
-            current_new_lexicon_entries = chosen_new_lexicon_entries
-            current_skipped_surface_forms = chosen_skipped_surface_forms
-            match = False
-            first = True
-            if chosen_parse is None:
-                if verbose >= 2:
-                    print "WARNING: could not find valid parse for '" + x + "' during training"  # DEBUG
-                num_fails += 1
-                continue
-            while correct_parse is None and current_parse is not None:
-                if y.equal_allowing_commutativity(current_parse.node, self.ontology):
-                    correct_parse = current_parse
-                    correct_new_lexicon_entries = current_new_lexicon_entries
-                    correct_skipped_surface_forms = current_skipped_surface_forms
-                    if first:
-                        match = True
-                        num_matches += 1
-                    else:
-                        num_trainable += 1
-                    break
-                first = False
-                current_parse, correct_score, current_new_lexicon_entries, current_skipped_surface_forms = \
+    # use_condor - whether to get training pairs in parallel using the UT CS Condor cluster
+    def get_training_pairs(self, d, verbose, reranker_beam=1, use_condor=False):
+
+        # If using the Condor cluster, pickle self and launch the specialized script designed for that.
+        if use_condor:
+            with open("temp.parser.pickle", 'wb') as f:
+                pickle.dump(self, f)
+            with open("temp.pairs.in.pickle", 'wb') as f:
+                pickle.dump(d, f)
+            cmd = ("python _condor_get_training_pairs.py" +
+                   " --parser_infile temp.parser.pickle" +
+                   " --pairs_infile temp.pairs.in.pickle" +
+                   " --outfile temp.pairs.out.pickle")
+            err = os.system(cmd)  # blocking
+            print "_condor_get_training_pairs output: " + err
+            with open("temp.pairs.out.pickle", 'rb') as f:
+                t, num_trainable, num_matches, num_fails, num_genlex_only = pickle.load(f)
+            os.system("rm temp.parser.pickle")
+            os.system("rm temp.pairs.in.pickle")
+            os.system("rm temp.pairs.out.pickle")
+
+        else:
+            t = []
+            num_trainable = 0
+            num_matches = 0
+            num_fails = 0
+            num_genlex_only = 0
+            for [x, y] in d:
+                correct_parse = None
+                correct_new_lexicon_entries = []
+                cky_parse_generator = self.most_likely_cky_parse(x, reranker_beam=reranker_beam, known_root=y,
+                                                                 reverse_fa_beam=self.training_reverse_fa_beam)
+                chosen_parse, chosen_score, chosen_new_lexicon_entries, chosen_skipped_surface_forms = \
                     next(cky_parse_generator)
-            if correct_parse is None:
+                current_parse = chosen_parse
+                correct_score = chosen_score
+                current_new_lexicon_entries = chosen_new_lexicon_entries
+                current_skipped_surface_forms = chosen_skipped_surface_forms
+                match = False
+                first = True
+                if chosen_parse is None:
+                    if verbose >= 2:
+                        print "WARNING: could not find valid parse for '" + x + "' during training"  # DEBUG
+                    num_fails += 1
+                    continue
+                while correct_parse is None and current_parse is not None:
+                    if y.equal_allowing_commutativity(current_parse.node, self.ontology):
+                        correct_parse = current_parse
+                        correct_new_lexicon_entries = current_new_lexicon_entries
+                        correct_skipped_surface_forms = current_skipped_surface_forms
+                        if first:
+                            match = True
+                            num_matches += 1
+                        else:
+                            num_trainable += 1
+                        break
+                    first = False
+                    current_parse, correct_score, current_new_lexicon_entries, current_skipped_surface_forms = \
+                        next(cky_parse_generator)
+                if correct_parse is None:
+                    if verbose >= 2:
+                        print "WARNING: could not find correct parse for '"+str(x)+"' during training"
+                    num_fails += 1
+                    continue
                 if verbose >= 2:
-                    print "WARNING: could not find correct parse for '"+str(x)+"' during training"
-                num_fails += 1
-                continue
-            if verbose >= 2:
-                print "\tx: "+str(x)  # DEBUG
-                print "\t\tchosen_parse: "+self.print_parse(chosen_parse.node, show_category=True)  # DEBUG
-                print "\t\tchosen_score: "+str(chosen_score)  # DEBUG
-                print "\t\tchosen_skips: "+str(chosen_skipped_surface_forms)  # DEBUG
-                if len(chosen_new_lexicon_entries) > 0:  # DEBUG
-                    print "\t\tchosen_new_lexicon_entries: "  # DEBUG
-                    for sf, sem in chosen_new_lexicon_entries:  # DEBUG
-                        print "\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
-            if not match or len(correct_new_lexicon_entries) > 0:
-                if len(correct_new_lexicon_entries) > 0:
-                    num_genlex_only += 1
-                if verbose >= 2:
-                    print "\t\ttraining example generated:"  # DEBUG
-                    print "\t\t\tcorrect_parse: "+self.print_parse(correct_parse.node, show_category=True)  # DEBUG
-                    print "\t\t\tcorrect_score: "+str(correct_score)  # DEBUG
-                    print "\t\t\tcorrect_skips: " + str(correct_skipped_surface_forms)  # DEBUG
-                    if len(correct_new_lexicon_entries) > 0:  # DEBUG
-                        print "\t\t\tcorrect_new_lexicon_entries: "  # DEBUG
-                        for sf, sem in correct_new_lexicon_entries:  # DEBUG
-                            print "\t\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
-                    print "\t\t\ty: "+self.print_parse(y, show_category=True)  # DEBUG
-                t.append([x, chosen_parse, correct_parse, chosen_new_lexicon_entries, correct_new_lexicon_entries,
-                          chosen_skipped_surface_forms, correct_skipped_surface_forms])
+                    print "\tx: "+str(x)  # DEBUG
+                    print "\t\tchosen_parse: "+self.print_parse(chosen_parse.node, show_category=True)  # DEBUG
+                    print "\t\tchosen_score: "+str(chosen_score)  # DEBUG
+                    print "\t\tchosen_skips: "+str(chosen_skipped_surface_forms)  # DEBUG
+                    if len(chosen_new_lexicon_entries) > 0:  # DEBUG
+                        print "\t\tchosen_new_lexicon_entries: "  # DEBUG
+                        for sf, sem in chosen_new_lexicon_entries:  # DEBUG
+                            print "\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
+                if not match or len(correct_new_lexicon_entries) > 0:
+                    if len(correct_new_lexicon_entries) > 0:
+                        num_genlex_only += 1
+                    if verbose >= 2:
+                        print "\t\ttraining example generated:"  # DEBUG
+                        print "\t\t\tcorrect_parse: "+self.print_parse(correct_parse.node, show_category=True)  # DEBUG
+                        print "\t\t\tcorrect_score: "+str(correct_score)  # DEBUG
+                        print "\t\t\tcorrect_skips: " + str(correct_skipped_surface_forms)  # DEBUG
+                        if len(correct_new_lexicon_entries) > 0:  # DEBUG
+                            print "\t\t\tcorrect_new_lexicon_entries: "  # DEBUG
+                            for sf, sem in correct_new_lexicon_entries:  # DEBUG
+                                print "\t\t\t\t'"+sf+"' :- "+self.print_parse(sem, show_category=True)  # DEBUG
+                        print "\t\t\ty: "+self.print_parse(y, show_category=True)  # DEBUG
+                    t.append([x, chosen_parse, correct_parse, chosen_new_lexicon_entries, correct_new_lexicon_entries,
+                              chosen_skipped_surface_forms, correct_skipped_surface_forms])
+
         if verbose >= 1:
             print "\tmatched "+str(num_matches)+"/"+str(len(d))  # DEBUG
             print "\ttrained "+str(num_trainable)+"/"+str(len(d))  # DEBUG

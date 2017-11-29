@@ -22,6 +22,7 @@ def main():
     allow_merge = True if FLAGS_allow_merge == 1 else False
     perform_type_raising = True if FLAGS_perform_type_raising == 1 else False
     verbose = FLAGS_verbose
+    use_condor = True if FLAGS_use_condor == 1 else False
     assert validation_pairs_fn is None or max_epochs >= epochs_between_validations
 
     o = Ontology.Ontology(ontology_fn)
@@ -43,7 +44,7 @@ def main():
             print "validation accuracy at 1 for epoch " + str(epoch) + ": " + str(acc_at_1)
         converged = p.train_learner_on_semantic_forms(train_data, epochs=epochs_between_validations,
                                                       epoch_offset=epoch, reranker_beam=1,
-                                                      verbose=verbose)
+                                                      verbose=verbose, use_condor=use_condor)
         if converged:
             print "training converged after epoch " + str(epoch)
             break
@@ -92,6 +93,8 @@ if __name__ == '__main__':
                         help="whether to type-raise bare nouns (requires <e,t> types)")
     parser.add_argument('--verbose', type=int, required=False, default=1,
                         help="the verbosity level during training in 0, 1, 2")
+    parser.add_argument('--use_condor', type=int, required=False, default=0,
+                        help="whether to use condor when getting training pairs at each epoch")
     args = parser.parse_args()
     for k, v in vars(args).items():
         globals()['FLAGS_%s' % k] = v
