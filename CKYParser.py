@@ -476,8 +476,8 @@ class CKYParser:
         self.max_multiword_expression = 1  # max span of a multi-word expression to be considered during tokenization
         self.max_new_senses_per_utterance = 3  # max number of new word senses that can be induced on a training example
         self.max_cky_trees_per_token_sequence_beam = 16  # for tokenization of an utterance, max cky trees considered
-        self.max_hypothesis_categories_for_unknown_token_beam = 10  # for unknown token, max syntax categories tried
-        self.max_expansions_per_non_terminal = 10  # decides how many expansions to store per CKY cell
+        self.max_hypothesis_categories_for_unknown_token_beam = 16  # for unknown token, max syntax categories tried
+        self.max_expansions_per_non_terminal = 16  # decides how many expansions to store per CKY cell
         self.max_new_skipwords_per_utterance = 2  # how many unknown skipwords to consider for a new utterance
         self.max_missing_words_to_try = 2  # how many words that have meanings already to sample for new meanings
         self.missing_lexicon_entry_given_token_penalty = -100  # additional log probability to lose for missing lex
@@ -488,7 +488,7 @@ class CKYParser:
         # topdown trees to consider during generation per sequence of tokens and ccg tree
         self.training_max_topdown_trees_to_consider = 32
         # semantic leaf assignments to consider when parsing a sequence of tokens
-        self.max_leaf_assignments_to_consider = 32
+        self.max_leaf_assignments_to_consider = 64
 
         # behavioral parameters
         self.safety = True  # set to False for deployment to speed up parser
@@ -582,7 +582,7 @@ class CKYParser:
 
     # read in data set of form utterance\nCCG : semantic_form\n\n...
     def read_in_paired_utterance_semantics(self, fname):
-        debug = True
+        debug = False
 
         d = []
         f = open(fname, 'r')
@@ -639,7 +639,7 @@ class CKYParser:
                    " --pairs_infile temp.pairs.in.pickle" +
                    " --outfile temp.pairs.out.pickle")
             err = os.system(cmd)  # blocking
-            print "_condor_get_training_pairs output: " + err
+            print "_condor_get_training_pairs output: " + str(err)
             with open("temp.pairs.out.pickle", 'rb') as f:
                 t, num_trainable, num_matches, num_fails, num_genlex_only = pickle.load(f)
             os.system("rm temp.parser.pickle")
@@ -738,6 +738,8 @@ class CKYParser:
             if tk not in self.lexicon.surface_forms:
                 nn = self.lexicon.get_lexicon_word_embedding_neighbors(
                     tk, len(self.lexicon.surface_forms))
+                if len(nn) == 0:  # TEST: add all lexical entries with minimal similarity
+                    nn = [(nsfidx, 0) for nsfidx in range(len(self.lexicon.surface_forms))]
                 if len(nn) > 0:
                     self.lexicon.surface_forms.append(tk)
                     self.lexicon.entries.append([])
@@ -1285,6 +1287,7 @@ class CKYParser:
                 semantic_candidates.append([sem_idx for sem_idx
                                             in self.lexicon.entries[self.lexicon.surface_forms.index(exp)]
                                             if self.lexicon.semantic_forms[sem_idx].category == leaf_categories[idx]])
+                # semantic_candidates.append([])  # always consider that this could be a new meaning
             else:  # unknown surface form with no semantic neighbors
                 # if the root is known, semantic candidates will be generated after the fact top-down
                 if known_root is not None:
@@ -1334,7 +1337,9 @@ class CKYParser:
             scores[tuple(assignments)] = score
 
         # yield the assignment tuples in order by score as lists of ParseNodes
-        for assignment, score in sorted(scores.items(), key=operator.itemgetter(1), reverse=True):
+        sorted_assignments_and_scores = sorted(scores.items(), key=operator.itemgetter(1), reverse=True)
+        sorted_assignments_and_scores = self.shuffle_ties(sorted_assignments_and_scores)
+        for assignment, score in sorted_assignments_and_scores:
             if debug:
                 print ("most_likely_semantic_leaves: yielding assignments: " +
                        str([self.print_parse(self.lexicon.semantic_forms[semantic_candidates[idx][assignment[idx]]])
@@ -1827,8 +1832,11 @@ class CKYParser:
                                 c_obj.is_lambda and c_obj.is_lambda_instantiation and
                                 c_obj.lambda_name == curr.children[0].lambda_name):
                             # this basically controls against a lambda consuming an 'and' whose children are a mix of
-                            # already-instantiated preds and raw preds, e.g. lambda x(P(x) consuming
+                            # already-instantiated preds and raw preds, e.g. lambda x(P(x)) consuming
                             # and(lambda y(P1(y)), P2, P3), which should be -> lambda y(and(P1(y),P2(y),P3(y))
+                            if debug:
+                                print ("performing sub fa with '" + self.print_parse(c_obj, True) + "' and '" +
+                                       self.print_parse(curr.children[0], True) + "'")
                             b_new.children[i] = self.perform_fa(c_obj, curr.children[0], renumerate=False)
                         else:  # so instead of consuming and renumerating wrong, we can just strip the lambda header
                             b_new.children[i] = b_new.children[i].children[0]  # remove the extraneous instantiation
@@ -1941,7 +1949,8 @@ class CKYParser:
             ab.set_return_type(self.ontology)
         except TypeError as e:
             raise e
-        ab.set_category(self.lexicon.categories[a.category][0])
+        if top_level_call:  # TEST
+            ab.set_category(self.lexicon.categories[a.category][0])
         ab.commutative_raise_node(self.ontology)
         if debug:
             print "performed FA(2) with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True) + \
@@ -2363,3 +2372,21 @@ class CKYParser:
     def tokenize(self, s):
         str_parts = s.split()
         return str_parts
+
+    # given a sorted list of tuples as (key, value), shuffle the sublists with matching values
+    def shuffle_ties(self, l):
+        if len(l) > 1:
+            v = l[0][1]
+            idx = 0
+            for jdx in range(1, len(l)):
+                if v != l[jdx][1]:
+                    v = l[jdx][1]
+                    if jdx - 1 > idx:
+                        c = l[idx:jdx]
+                        random.shuffle(c)
+                        l = l[:idx] + c + l[jdx:]
+            if len(l) - 1 > idx:
+                c = l[idx:]
+                random.shuffle(c)
+                l = l[:idx] + c
+        return l
