@@ -738,7 +738,7 @@ class CKYParser:
             if tk not in self.lexicon.surface_forms:
                 nn = self.lexicon.get_lexicon_word_embedding_neighbors(
                     tk, len(self.lexicon.surface_forms))
-                if len(nn) == 0:  # TEST: add all lexical entries with minimal similarity
+                if len(nn) == 0:  # TEST: add all lexical entries with minimal similarity if no existing neighbors
                     nn = [(nsfidx, 0) for nsfidx in range(len(self.lexicon.surface_forms))]
                 if len(nn) > 0:
                     self.lexicon.surface_forms.append(tk)
@@ -1848,10 +1848,28 @@ class CKYParser:
                         b_new.children[i].parent = curr
                         b_new.children[i].set_return_type(self.ontology)
                     if curr.parent.is_lambda_instantiation:  # eg. 1(2) taking and(pred,pred) -> and(pred(2),pred(2)
+                        scoping_parent_lambda = curr.parent.lambda_name
                         b_new_arg = b_new.children[0]
                         while self.ontology.preds[b_new_arg.idx] == 'and':
                             if debug:
                                 print "B_new_arg: "+self.print_parse(b_new_arg)  # DEBUG
+                            for _c in b_new_arg.children:
+                                if (_c.children is not None and _c.children[0].is_lambda and
+                                        not _c.children[0].is_lambda_instantiation):
+                                    lambda_instance_unscoped = True
+                                    p = _c.parent
+                                    while p is not None:
+                                        if p.is_lambda_instantiation and p.lambda_name == _c.children[0].lambda_name:
+                                            lambda_instance_unscoped = False
+                                            break
+                                        else:
+                                            p = p.parent
+                                    if lambda_instance_unscoped:
+                                        if debug:
+                                            print "found unscoped lambda " + str(_c.children[0].lambda_name)
+                                        _c.children[0].lambda_name = scoping_parent_lambda
+                                        if debug:
+                                            print "changed to scoping 'and' parent lambda " + str(scoping_parent_lambda)
                             b_new_arg = b_new_arg.children[0]
                         if debug:
                             print "setting curr parent lambda name to child of "+self.print_parse(b_new_arg)  # DEBUG
