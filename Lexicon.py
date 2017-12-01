@@ -25,9 +25,9 @@ class Lexicon:
         if fn is not None:
             wvb = True if fn.split('.')[-1] == 'bin' else False
             try:
-                wv = gensim.models.Word2Vec.load_word2vec_format(fn, binary=wvb, limit=50000)
-            except DeprecationWarning:
                 wv = gensim.models.KeyedVectors.load_word2vec_format(fn, binary=wvb, limit=50000)
+            except AttributeError:
+                wv = gensim.models.Word2Vec.load_word2vec_format(fn, binary=wvb, limit=50000)
         else:
             wv = None
         return wv
