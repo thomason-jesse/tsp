@@ -605,11 +605,14 @@ class CKYParser:
         return d
 
     # take in a data set D=(x,y) for x expressions and y correct semantic form and update CKYParser parameters
-    def train_learner_on_semantic_forms(self, d, epochs=10, epoch_offset=0, reranker_beam=1, verbose=2, use_condor=False):
+    def train_learner_on_semantic_forms(self, d, epochs=10, epoch_offset=0, reranker_beam=1, verbose=2,
+                                        use_condor=False, condor_target_dir=None, condor_script_dir=None):
         for e in range(0, epochs):
             if verbose >= 1:
                 print "epoch " + str(e + epoch_offset)  # DEBUG
-            t, failures = self.get_training_pairs(d, verbose, reranker_beam=reranker_beam, use_condor=use_condor)
+            t, failures = self.get_training_pairs(d, verbose, reranker_beam=reranker_beam,
+                                                  use_condor=use_condor, condor_target_dir=condor_target_dir,
+                                                  condor_script_dir=condor_script_dir)
             if len(t) == 0:
                 print "training converged at epoch " + str(e)
                 if failures == 0:
@@ -626,25 +629,32 @@ class CKYParser:
     # reranker_beam - determines how many parses to get for re-ranking
     # beam determines how many cky_trees to look through before giving up on a given input
     # use_condor - whether to get training pairs in parallel using the UT CS Condor cluster
-    def get_training_pairs(self, d, verbose, reranker_beam=1, use_condor=False):
+    def get_training_pairs(self, d, verbose, reranker_beam=1,
+                           use_condor=False, condor_target_dir=None, condor_script_dir=None):
 
         # If using the Condor cluster, pickle self and launch the specialized script designed for that.
         if use_condor:
-            with open("temp.parser.pickle", 'wb') as f:
+            parser_fn = os.path.join(condor_target_dir, "temp.parser.pickle")
+            with open(parser_fn, 'wb') as f:
                 pickle.dump(self, f)
-            with open("temp.pairs.in.pickle", 'wb') as f:
+            pairs_in_fn = os.path.join(condor_target_dir, "temp.pairs.in.pickle")
+            with open(pairs_in_fn, 'wb') as f:
                 pickle.dump(d, f)
-            cmd = ("python _condor_get_training_pairs.py" +
-                   " --parser_infile temp.parser.pickle" +
-                   " --pairs_infile temp.pairs.in.pickle" +
-                   " --outfile temp.pairs.out.pickle")
-            err = os.system(cmd)  # blocking
+            pairs_out_fn = os.path.join(condor_target_dir, "temp.pairs.out.pickle")
+            script_fn = os.path.join(condor_script_dir, "_condor_get_training_pairs.py")
+            cmd = ("python " + script_fn +
+                   " --target_dir " + condor_target_dir +
+                   " --script_dir " + condor_script_dir +
+                   " --parser_infile " + parser_fn +
+                   " --pairs_infile " + pairs_in_fn +
+                   " --outfile " + pairs_out_fn)
+            err = os.system(cmd)  # blocking call to script that launches jobs and collects them map-reduce style
             print "_condor_get_training_pairs output: " + str(err)
-            with open("temp.pairs.out.pickle", 'rb') as f:
+            with open(pairs_out_fn, 'rb') as f:
                 t, num_trainable, num_matches, num_fails, num_genlex_only = pickle.load(f)
-            os.system("rm temp.parser.pickle")
-            os.system("rm temp.pairs.in.pickle")
-            os.system("rm temp.pairs.out.pickle")
+            os.system("rm " + parser_fn)
+            os.system("rm " + pairs_in_fn)
+            os.system("rm " + pairs_out_fn)
 
         else:
             t = []
@@ -738,7 +748,8 @@ class CKYParser:
             if tk not in self.lexicon.surface_forms:
                 nn = self.lexicon.get_lexicon_word_embedding_neighbors(
                     tk, len(self.lexicon.surface_forms))
-                if len(nn) == 0:  # TEST: add all lexical entries with minimal similarity if no existing neighbors
+                # Add all lexical entries with minimal similarity if no existing neighbors but embeddings present.
+                if len(nn) == 0 and self.lexicon.wv is not None:
                     nn = [(nsfidx, 0) for nsfidx in range(len(self.lexicon.surface_forms))]
                 if len(nn) > 0:
                     self.lexicon.surface_forms.append(tk)

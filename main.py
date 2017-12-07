@@ -23,7 +23,10 @@ def main():
     perform_type_raising = True if FLAGS_perform_type_raising == 1 else False
     verbose = FLAGS_verbose
     use_condor = True if FLAGS_use_condor == 1 else False
+    condor_target_dir = FLAGS_condor_target_dir
+    condor_script_dir = FLAGS_condor_script_dir
     assert validation_pairs_fn is None or max_epochs >= epochs_between_validations
+    assert not use_condor or (condor_target_dir is not None and condor_script_dir is not None)
 
     o = Ontology.Ontology(ontology_fn)
     l = Lexicon.Lexicon(o, lexicon_fn, word_embeddings_fn=lexicon_embeddings,)
@@ -44,7 +47,9 @@ def main():
             print "validation accuracy at 1 for epoch " + str(epoch) + ": " + str(acc_at_1)
         converged = p.train_learner_on_semantic_forms(train_data, epochs=epochs_between_validations,
                                                       epoch_offset=epoch, reranker_beam=1,
-                                                      verbose=verbose, use_condor=use_condor)
+                                                      verbose=verbose,
+                                                      use_condor=use_condor, condor_target_dir=condor_target_dir,
+                                                      condor_script_dir=condor_script_dir)
         if converged:
             print "training converged after epoch " + str(epoch)
             break
@@ -95,6 +100,10 @@ if __name__ == '__main__':
                         help="the verbosity level during training in 0, 1, 2")
     parser.add_argument('--use_condor', type=int, required=False, default=0,
                         help="whether to use condor when getting training pairs at each epoch")
+    parser.add_argument('--condor_target_dir', type=str, required=False, default=None,
+                        help="directory to write condor files")
+    parser.add_argument('--condor_script_dir', type=str, required=False, default=None,
+                        help="path to TSP condor help scripts")
     args = parser.parse_args()
     for k, v in vars(args).items():
         globals()['FLAGS_%s' % k] = v

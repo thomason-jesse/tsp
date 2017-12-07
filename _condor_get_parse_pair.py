@@ -3,7 +3,6 @@ __author__ = 'jesse'
 
 import argparse
 import pickle
-import time
 
 
 def main():
