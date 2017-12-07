@@ -159,10 +159,22 @@ class SemanticNode:
                         nc.parent = curr
                     new_c = sorted(new_c, key=lambda node: node.idx)
                     curr.children = new_c
-                    if ontology.preds[curr.idx] == 'and':  # TODO: this is vestigal and gross; should work around it
+                    if ontology.preds[curr.idx] == 'and':  # TODO: this is vestigial and gross; should work around it
                         curr.set_type_from_children_return_types(curr.children[0].return_type, ontology)
             if curr.children is not None:
                 to_expand.extend(curr.children)
+
+    def commutative_lower_node(self, ontology):
+        to_explore = [self]
+        while len(to_explore) > 0:
+            curr = to_explore.pop()
+            if curr.idx in ontology.commutative:
+                if curr.children is not None and len(curr.children) > 2:
+                    children_to_nest = copy.deepcopy(curr.children[1:])
+                    curr.children = [curr.children[0], SemanticNode(curr, curr.type, curr.category,
+                                                                    False, idx=curr.idx, children=children_to_nest)]
+            if curr.children is not None:
+                to_explore.extend(curr.children)
 
     # given children, add types as necessary to make func take them and return r
     def set_type_from_children_return_types(self, r, ontology):

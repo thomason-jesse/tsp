@@ -15,7 +15,7 @@ def main():
 
     # Load the parser and prepare the pair.
     with open(parser_infile, 'rb') as f:
-        parser = pickle.load(f)
+        p = pickle.load(f)
     with open(pairs_infile, 'rb') as f:
         pairs = pickle.load(f)
     x, y = pairs[pair_idx]
@@ -28,8 +28,8 @@ def main():
 
     correct_parse = None
     correct_new_lexicon_entries = []
-    cky_parse_generator = parser.most_likely_cky_parse(x, reranker_beam=1, known_root=y,
-                                                       reverse_fa_beam=parser.training_reverse_fa_beam)
+    cky_parse_generator = p.most_likely_cky_parse(x, reranker_beam=1, known_root=y,
+                                                  reverse_fa_beam=p.training_reverse_fa_beam)
     chosen_parse, chosen_score, chosen_new_lexicon_entries, chosen_skipped_surface_forms = \
         next(cky_parse_generator)
     current_parse = chosen_parse
@@ -44,7 +44,7 @@ def main():
         num_fails += 1
     else:
         while correct_parse is None and current_parse is not None:
-            if y.equal_allowing_commutativity(current_parse.node, parser.ontology):
+            if y.equal_allowing_commutativity(current_parse.node, p.ontology):
                 correct_parse = current_parse
                 correct_new_lexicon_entries = current_new_lexicon_entries
                 correct_skipped_surface_forms = current_skipped_surface_forms
@@ -62,25 +62,25 @@ def main():
             num_fails += 1
         else:
             print "\tx: "+str(x)  # DEBUG
-            print "\t\tchosen_parse: "+parser.print_parse(chosen_parse.node, show_category=True)  # DEBUG
+            print "\t\tchosen_parse: "+p.print_parse(chosen_parse.node, show_category=True)  # DEBUG
             print "\t\tchosen_score: "+str(chosen_score)  # DEBUG
             print "\t\tchosen_skips: "+str(chosen_skipped_surface_forms)  # DEBUG
             if len(chosen_new_lexicon_entries) > 0:  # DEBUG
                 print "\t\tchosen_new_lexicon_entries: "  # DEBUG
                 for sf, sem in chosen_new_lexicon_entries:  # DEBUG
-                    print "\t\t\t'"+sf+"' :- "+parser.print_parse(sem, show_category=True)  # DEBUG
+                    print "\t\t\t'"+sf+"' :- "+p.print_parse(sem, show_category=True)  # DEBUG
             if not match or len(correct_new_lexicon_entries) > 0:
                 if len(correct_new_lexicon_entries) > 0:
                     num_genlex_only += 1
                 print "\t\ttraining example generated:"  # DEBUG
-                print "\t\t\tcorrect_parse: "+parser.print_parse(correct_parse.node, show_category=True)  # DEBUG
+                print "\t\t\tcorrect_parse: "+p.print_parse(correct_parse.node, show_category=True)  # DEBUG
                 print "\t\t\tcorrect_score: "+str(correct_score)  # DEBUG
                 print "\t\t\tcorrect_skips: " + str(correct_skipped_surface_forms)  # DEBUG
                 if len(correct_new_lexicon_entries) > 0:  # DEBUG
                     print "\t\t\tcorrect_new_lexicon_entries: "  # DEBUG
                     for sf, sem in correct_new_lexicon_entries:  # DEBUG
-                        print "\t\t\t\t'"+sf+"' :- "+parser.print_parse(sem, show_category=True)  # DEBUG
-                print "\t\t\ty: "+parser.print_parse(y, show_category=True)  # DEBUG
+                        print "\t\t\t\t'"+sf+"' :- "+p.print_parse(sem, show_category=True)  # DEBUG
+                print "\t\t\ty: "+p.print_parse(y, show_category=True)  # DEBUG
 
     # Output relevant data in results structure.
     result = {'num_trainable': num_trainable, 'num_matches': num_matches, 'num_fails': num_fails, 'num_genlex_only': num_genlex_only,

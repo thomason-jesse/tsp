@@ -606,13 +606,16 @@ class CKYParser:
 
     # take in a data set D=(x,y) for x expressions and y correct semantic form and update CKYParser parameters
     def train_learner_on_semantic_forms(self, d, epochs=10, epoch_offset=0, reranker_beam=1, verbose=2,
-                                        use_condor=False, condor_target_dir=None, condor_script_dir=None):
+                                        use_condor=False, condor_target_dir=None, condor_script_dir=None,
+                                        perf_log=None):
         for e in range(0, epochs):
             if verbose >= 1:
                 print "epoch " + str(e + epoch_offset)  # DEBUG
             t, failures = self.get_training_pairs(d, verbose, reranker_beam=reranker_beam,
                                                   use_condor=use_condor, condor_target_dir=condor_target_dir,
                                                   condor_script_dir=condor_script_dir)
+            if perf_log is not None:
+                perf_log.append((len(t), len(failures)))
             if len(t) == 0:
                 print "training converged at epoch " + str(e)
                 if failures == 0:

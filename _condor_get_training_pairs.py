@@ -91,8 +91,8 @@ def main():
                             # Error, so move on and save log.
                             print ("_condor_get_training_pairs: discovered failed job for pair idx " +
                                    str(idx) + ": '" + str(d[idx][0]) + "'")
-                            # print ("_condor_get_training_pairs: ... with form " +
-                            #        p.print_parse(d[idx][1])
+                            print ("_condor_get_training_pairs: ... with form " +
+                                   p.print_parse(d[idx][1]))
                             print ("_condor_get_training_pairs: and error '" + err_text + "'")
                             os.system("mv " + err_fn + " " + err_fn + ".autosave")  # preserve the error log on disk
                             newly_completed.append(idx)
