@@ -615,7 +615,7 @@ class CKYParser:
                                                   use_condor=use_condor, condor_target_dir=condor_target_dir,
                                                   condor_script_dir=condor_script_dir)
             if perf_log is not None:
-                perf_log.append((len(t), len(failures)))
+                perf_log.append((len(t), failures))
             if len(t) == 0:
                 print "training converged at epoch " + str(e)
                 if failures == 0:
