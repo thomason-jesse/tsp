@@ -1314,6 +1314,7 @@ class CKYParser:
                                                 if self.lexicon.semantic_forms[sem_idx].category
                                                 == leaf_categories[idx]])
                     semantic_candidates[-1].append(None)
+            random.shuffle(semantic_candidates[-1])
 
         # print "semantic_candidates: "+str(semantic_candidates)  # DEBUG
 

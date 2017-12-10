@@ -67,11 +67,13 @@ def main():
                     num_fails += result['num_fails']
                     num_genlex_only += result['num_genlex_only']
                     if result['num_fails'] == 0:
-                        t.append([result['x'], result['chosen_parse'], result['correct_parse'], result['chosen_new_lexicon_entries'],
+                        t.append([result['x'], result['chosen_parse'], result['correct_parse'],
+                                  result['chosen_new_lexicon_entries'],
                                   result['correct_new_lexicon_entries'], result['chosen_skipped_surface_forms'],
                                   result['correct_skipped_surface_forms']])
                     else:
-                        print ("_condor_get_training_pairs: failed parse for '" + result['x'] + "'")
+                        print ("_condor_get_training_pairs: failed parse for '" + result['x'] + "' with form " +
+                               p.print_parse(d[idx][1], True))
 
                     newly_completed.append(idx)
 
@@ -80,7 +82,7 @@ def main():
                 os.system("rm " + err_fn)  # remove err file
 
             # Output pickle hasn't been written yet.
-            except (IOError, ValueError):
+            except (IOError, ValueError, EOFError):
 
                 # Check for a non-empty error log, suggesting the job has crashed.
                 try:
