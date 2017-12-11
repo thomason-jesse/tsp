@@ -314,6 +314,8 @@ class Parameters:
                         # print "Parameters: adding new surface form '"+surface_form+"'"  # DEBUG
                         self.lexicon.surface_forms.append(surface_form)
                     sf_idx = self.lexicon.surface_forms.index(surface_form)
+                    if sf_idx not in self._skipwords_given_surface_form:
+                        self._skipwords_given_surface_form[sf_idx] = 0
                     if sem_node not in self.lexicon.semantic_forms:
                         # print "Parameters: adding new semantic form '"+str(sem_node)+"'"  # DEBUG
                         self.lexicon.semantic_forms.append(sem_node)
@@ -762,6 +764,7 @@ class CKYParser:
                     # TODO: this should probably be a helper function to Parameters
                     # take on the skipwords score of nearest neighbor, adjusted towards 0 for similarity
                     if sfidx not in self.theta._skipwords_given_surface_form:
+                        print "sf " + tk + " taking on skipword score of nearest neighbor " + self.lexicon.surface_forms[nn[0][0]]  # DEBUG
                         self.theta._skipwords_given_surface_form[sfidx] = \
                             self.theta._skipwords_given_surface_form[nn[0][0]] * nn[0][1]
                     for nsfidx, sim in nn:
