@@ -764,7 +764,9 @@ class CKYParser:
                     # TODO: this should probably be a helper function to Parameters
                     # take on the skipwords score of nearest neighbor, adjusted towards 0 for similarity
                     if sfidx not in self.theta._skipwords_given_surface_form:
-                        print "sf " + tk + " taking on skipword score of nearest neighbor " + self.lexicon.surface_forms[nn[0][0]]  # DEBUG
+                        if debug:
+                            print ("sf " + tk + " taking on skipword score of nearest neighbor " +
+                                   self.lexicon.surface_forms[nn[0][0]])
                         self.theta._skipwords_given_surface_form[sfidx] = \
                             self.theta._skipwords_given_surface_form[nn[0][0]] * nn[0][1]
                     for nsfidx, sim in nn:
@@ -1865,33 +1867,42 @@ class CKYParser:
                             b_new.children[i].increment_lambdas(inc=deepest_lambda)
                         b_new.children[i].parent = curr
                         b_new.children[i].set_return_type(self.ontology)
-                    if curr.parent.is_lambda_instantiation:  # eg. 1(2) taking and(pred,pred) -> and(pred(2),pred(2)
-                        scoping_parent_lambda = curr.parent.lambda_name
-                        b_new_arg = b_new.children[0]
-                        while self.ontology.preds[b_new_arg.idx] == 'and':
+                    possible_parent_inst = curr.parent
+                    while possible_parent_inst is not None:
+                        # eg. 1(2) taking and(pred,pred) -> and(pred(2),pred(2)
+                        if possible_parent_inst.is_lambda_instantiation:
+                            scoping_parent_lambda = possible_parent_inst.lambda_name
+                            b_new_arg = b_new.children[0]
+                            while self.ontology.preds[b_new_arg.idx] == 'and':
+                                if debug:
+                                    print "B_new_arg: "+self.print_parse(b_new_arg)  # DEBUG
+                                for _c in b_new_arg.children:
+                                    if (_c.children is not None and _c.children[0].is_lambda and
+                                            not _c.children[0].is_lambda_instantiation):
+                                        lambda_instance_unscoped = True
+                                        p = _c.parent
+                                        while p is not None:
+                                            if (p.is_lambda_instantiation and
+                                                    p.lambda_name == _c.children[0].lambda_name):
+                                                lambda_instance_unscoped = False
+                                                break
+                                            else:
+                                                p = p.parent
+                                        if lambda_instance_unscoped:
+                                            if debug:
+                                                print "found unscoped lambda " + str(_c.children[0].lambda_name)
+                                            _c.children[0].lambda_name = scoping_parent_lambda
+                                            if debug:
+                                                print ("changed to scoping 'and' parent lambda " +
+                                                       str(scoping_parent_lambda))
+                                b_new_arg = b_new_arg.children[0]
                             if debug:
-                                print "B_new_arg: "+self.print_parse(b_new_arg)  # DEBUG
-                            for _c in b_new_arg.children:
-                                if (_c.children is not None and _c.children[0].is_lambda and
-                                        not _c.children[0].is_lambda_instantiation):
-                                    lambda_instance_unscoped = True
-                                    p = _c.parent
-                                    while p is not None:
-                                        if p.is_lambda_instantiation and p.lambda_name == _c.children[0].lambda_name:
-                                            lambda_instance_unscoped = False
-                                            break
-                                        else:
-                                            p = p.parent
-                                    if lambda_instance_unscoped:
-                                        if debug:
-                                            print "found unscoped lambda " + str(_c.children[0].lambda_name)
-                                        _c.children[0].lambda_name = scoping_parent_lambda
-                                        if debug:
-                                            print "changed to scoping 'and' parent lambda " + str(scoping_parent_lambda)
-                            b_new_arg = b_new_arg.children[0]
-                        if debug:
-                            print "setting curr parent lambda name to child of "+self.print_parse(b_new_arg)  # DEBUG
-                        curr.parent.lambda_name = b_new_arg.children[0].lambda_name
+                                print ("setting possible_parent_inst lambda name to child of " +
+                                       self.print_parse(b_new_arg))
+                            possible_parent_inst.lambda_name = b_new_arg.children[0].lambda_name
+                            break
+                        else:
+                            possible_parent_inst = possible_parent_inst.parent
                     if raised:
                         b_new.set_category(self.lexicon.categories.index(
                             [self.lexicon.categories.index('N'), 1, self.lexicon.categories.index('N')]))
