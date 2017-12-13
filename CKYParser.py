@@ -741,7 +741,6 @@ class CKYParser:
     # providing it as an argument to this method allows top-down generation
     # to find new lexical entries for surface forms not yet recognized
     def most_likely_cky_parse(self, s, reranker_beam=1, known_root=None, reverse_fa_beam=None, debug=False):
-        debug = False
         s = s.strip()
         if len(s) == 0:
             raise AssertionError("Cannot parse provided string of length zero")
