@@ -12,13 +12,21 @@ def main():
     pairs_infile = FLAGS_pairs_infile
     pair_idx = FLAGS_pair_idx
     outfile = FLAGS_outfile
+    x = FLAGS_x
+    y = FLAGS_y
 
     # Load the parser and prepare the pair.
     with open(parser_infile, 'rb') as f:
         p = pickle.load(f)
-    with open(pairs_infile, 'rb') as f:
-        pairs = pickle.load(f)
-    x, y = pairs[pair_idx]
+    if x is not None and y is not None:
+        ccg_str, form_str = y.split(" : ")
+        ccg = p.lexicon.read_category_from_str(ccg_str)
+        y = p.lexicon.read_semantic_form_from_str(form_str, None, None, [])
+        y.category = ccg
+    else:
+        with open(pairs_infile, 'rb') as f:
+            pairs = pickle.load(f)
+        x, y = pairs[pair_idx]
 
     # Parse.
     num_trainable = 0
@@ -29,7 +37,8 @@ def main():
     correct_parse = None
     correct_new_lexicon_entries = []
     cky_parse_generator = p.most_likely_cky_parse(x, reranker_beam=1, known_root=y,
-                                                  reverse_fa_beam=p.training_reverse_fa_beam)
+                                                  reverse_fa_beam=p.training_reverse_fa_beam,
+                                                  debug=False)
     chosen_parse, chosen_score, chosen_new_lexicon_entries, chosen_skipped_surface_forms = \
         next(cky_parse_generator)
     current_parse = chosen_parse
@@ -101,6 +110,11 @@ if __name__ == '__main__':
                         help="the pair idx in the pairs_infile pickle this thread will process")
     parser.add_argument('--outfile', type=str, required=True,
                         help="where to dump new pair information")
+    parser.add_argument('--x', type=str, required=False,
+                        help="an input utterance")
+    parser.add_argument('--y', type=str, required=False,
+                        help="a target form")
+
     args = parser.parse_args()
     for k, v in vars(args).items():
         globals()['FLAGS_%s' % k] = v

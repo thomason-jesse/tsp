@@ -458,6 +458,9 @@ class CKYParser:
     def __init__(self, ont, lex, use_language_model=False, lexicon_weight=1.0, perform_type_raising=True,
                  allow_merge=True):
 
+        # behavioral parameters
+        self.safety = True  # set to False for deployment to speed up parser
+
         # resources given on instantiation
         self.ontology = ont
         self.lexicon = lex
@@ -477,23 +480,20 @@ class CKYParser:
         self.allow_merge = allow_merge  # allows 'and' to merge to adjacent same-category nodes
         self.max_multiword_expression = 1  # max span of a multi-word expression to be considered during tokenization
         self.max_new_senses_per_utterance = 3  # max number of new word senses that can be induced on a training example
-        self.max_cky_trees_per_token_sequence_beam = 16  # for tokenization of an utterance, max cky trees considered
-        self.max_hypothesis_categories_for_unknown_token_beam = 16  # for unknown token, max syntax categories tried
-        self.max_expansions_per_non_terminal = 16  # decides how many expansions to store per CKY cell
+        self.max_cky_trees_per_token_sequence_beam = 32  # for tokenization of an utterance, max cky trees considered
+        self.max_hypothesis_categories_for_unknown_token_beam = 32  # for unknown token, max syntax categories tried
+        self.max_expansions_per_non_terminal = 32  # decides how many expansions to store per CKY cell
         self.max_new_skipwords_per_utterance = 2  # how many unknown skipwords to consider for a new utterance
         self.max_missing_words_to_try = 2  # how many words that have meanings already to sample for new meanings
         self.missing_lexicon_entry_given_token_penalty = -100  # additional log probability to lose for missing lex
         self.missing_CCG_given_token_penalty = -100  # additional log probability to lose for missing CCG
         # how many consumptions to consider during reverse function application, or None for an exhaustive search
-        self.training_reverse_fa_beam = 16
+        self.training_reverse_fa_beam = 32
         self.max_skip_sequences_to_consider = 32  # total variations of skip sequences to consider per utterance
         # topdown trees to consider during generation per sequence of tokens and ccg tree
         self.training_max_topdown_trees_to_consider = 32
         # semantic leaf assignments to consider when parsing a sequence of tokens
         self.max_leaf_assignments_to_consider = 64
-
-        # behavioral parameters
-        self.safety = True  # set to False for deployment to speed up parser
 
         # cache
         self.cached_combinations = {}  # indexed by left, then right node, value at result
@@ -515,46 +515,89 @@ class CKYParser:
             score += self.theta.token_given_token[key] if key in self.theta.token_given_token else 0.0
         return score
 
-    # perform type-raising on leaf-level lexicon entries
-    # this alters the given lexicon
+    # Perform type-raising on leaf-level lexicon entries.
+    # This passes through the lexicon looking for semantic entry bare nouns (type N),
+    # whose semantic body is a single pred p of type <*,t>. If there does not exist another entry of type N/N
+    # with body lambda x.(p(x)), one is created.
+    # Additionally creates an entry for a_*(lambda x.(p(x))) for a_* the appropriate abstraction type.
     def type_raise_bare_nouns(self):
+        debug = False
+
+        noun_phrase_cat_idx = self.lexicon.categories.index('NP')
         bare_noun_cat_idx = self.lexicon.categories.index('N')
+        raised_cat = [bare_noun_cat_idx, 1, bare_noun_cat_idx]
+        if raised_cat not in self.lexicon.categories:
+            self.lexicon.categories.append([bare_noun_cat_idx, 1, bare_noun_cat_idx])
         raised_cat_idx = self.lexicon.categories.index([bare_noun_cat_idx, 1, bare_noun_cat_idx])
-        e_idx = self.ontology.types.index('e')
-        e_to_t_idx = self.ontology.types.index([self.ontology.types.index('e'), self.ontology.types.index('t')])
+        t_idx = self.ontology.types.index('t')
         to_add = []
         for sf_idx in range(0, len(self.lexicon.surface_forms)):
             for sem_idx in self.lexicon.entries[sf_idx]:
                 sem = self.lexicon.semantic_forms[sem_idx]
-                if (sem.category == bare_noun_cat_idx and not sem.is_lambda and
-                        self.ontology.entries[sem.idx] == e_to_t_idx and sem.children is None):
-                    # ensure there isn't already a raised predicate matching this bare noun
-                    already_raised = False
-                    for alt_idx in self.lexicon.entries[sf_idx]:
-                        alt = self.lexicon.semantic_forms[alt_idx]
-                        if (alt.category == raised_cat_idx and alt.is_lambda and
-                                alt.type == e_idx and
-                                not alt.children[0].is_lambda and
-                                self.ontology.entries[alt.children[0].idx] == e_to_t_idx and
-                                alt.children[0].children[0].is_lambda_instantiation):
-                            already_raised = True
-                            break
-                    if not already_raised:
-                        raised_sem = SemanticNode.SemanticNode(None, e_idx, raised_cat_idx,
-                                                               True, lambda_name=0, is_lambda_instantiation=True)
-                        raised_pred = copy.deepcopy(sem)
-                        raised_pred.parent = raised_sem
-                        lambda_inst = SemanticNode.SemanticNode(raised_pred, e_idx, bare_noun_cat_idx,
-                                                                True, lambda_name=0, is_lambda_instantiation=False)
-                        raised_pred.children = [lambda_inst]
-                        raised_sem.children = [raised_pred]
-                        to_add.append([sf_idx, sem_idx, raised_sem])
+                if sem.category == bare_noun_cat_idx and not sem.is_lambda and sem.children is None:
+                    sem_type_idx = self.ontology.entries[sem.idx]
+                    sem_type = self.ontology.types[sem_type_idx]
+                    if type(sem_type) is list and sem_type[1] == t_idx:
+                        # ensure there isn't already a raised predicate matching this bare noun
+                        already_raised = False
+                        raised_sem = None
+                        already_has_existential = False
+                        cons_type_idx = sem_type[0]
+                        cons_a_idx = self.ontology.preds.index("a_" + self.ontology.types[cons_type_idx])
+                        for alt_idx in self.lexicon.entries[sf_idx]:
+                            alt = self.lexicon.semantic_forms[alt_idx]
+                            if (alt.category == raised_cat_idx and alt.is_lambda and
+                                    alt.is_lambda_instantiation and
+                                    alt.type == cons_type_idx and
+                                    not alt.children[0].is_lambda and
+                                    self.ontology.entries[alt.children[0].idx] == sem_type_idx and
+                                    not alt.children[0].children[0].is_lambda_instantiation):
+                                already_raised = True
+                                raised_sem = alt
+                                if debug:
+                                    print ("type_raise_bare_nouns already raised: '" +
+                                           self.lexicon.surface_forms[sf_idx])
+                            elif (alt.category == noun_phrase_cat_idx and not alt.is_lambda and
+                                  alt.type == self.ontology.entries[cons_a_idx] and
+                                  alt.children[0].category == raised_cat_idx and alt.children[0].is_lambda and
+                                    alt.children[0].is_lambda_instantiation and
+                                    alt.children[0].type == cons_type_idx and
+                                    not alt.children[0].children[0].is_lambda and
+                                    self.ontology.entries[alt.children[0].children[0].idx] == sem_type_idx and
+                                    not alt.children[0].children[0].children[0].is_lambda_instantiation):
+                                already_has_existential = True
+                                if debug:
+                                    print ("type_raise_bare_nouns already existential: '" +
+                                           self.lexicon.surface_forms[sf_idx])
+                        if not already_raised:
+                            raised_sem = SemanticNode.SemanticNode(None, cons_type_idx, raised_cat_idx,
+                                                                   True, lambda_name=0,
+                                                                   is_lambda_instantiation=True)
+                            raised_pred = copy.deepcopy(sem)
+                            raised_pred.parent = raised_sem
+                            lambda_inst = SemanticNode.SemanticNode(raised_pred, cons_type_idx, bare_noun_cat_idx,
+                                                                    True, lambda_name=0,
+                                                                    is_lambda_instantiation=False)
+                            raised_pred.children = [lambda_inst]
+                            raised_sem.children = [raised_pred]
+                            to_add.append([sf_idx, sem_idx, raised_sem])
+                        if not already_has_existential:
+                            ex_sem = SemanticNode.SemanticNode(None, self.ontology.entries[cons_a_idx],
+                                                               noun_phrase_cat_idx, False, idx=cons_a_idx)
+                            ex_sem.children = [copy.deepcopy(raised_sem)]
+                            ex_sem.children[0].parent = ex_sem
+                            to_add.append([sf_idx, None, ex_sem])
         for sf_idx, sem_idx, sem in to_add:
-            # print "type_raise_bare_nouns raising: '"+self.lexicon.surface_forms[sf_idx] + \
-            #       "':- "+self.print_parse(sem, show_category=True)  # DEBUG
+            if debug:
+                print "type_raise_bare_nouns raising: '"+self.lexicon.surface_forms[sf_idx] + \
+                      "':- "+self.print_parse(sem, show_category=True)  # DEBUG
+            if self.safety and not sem.validate_tree_structure():
+                sys.exit("invalidly-linked tree structure " + self.print_parse(sem, True) + " generated " +
+                         "by type_raise_bare_nouns")
             self.lexicon.semantic_forms.append(sem)
             self.lexicon.entries[sf_idx].append(len(self.lexicon.semantic_forms)-1)
-            self.type_raised[sem_idx] = len(self.lexicon.semantic_forms)-1
+            if sem_idx is not None:
+                self.type_raised[sem_idx] = len(self.lexicon.semantic_forms)-1
 
     # print a SemanticNode as a string using the known ontology
     def print_parse(self, p, show_category=False, show_non_lambda_types=False):
@@ -1586,11 +1629,16 @@ class CKYParser:
             roots_yielded = 0
             while len(chart[key]) > 0 and roots_yielded < self.max_cky_trees_per_token_sequence_beam:
 
-                # find and yield best root
-                best_idx = 0
+                # find and yield best root (sampling among all those tied for best)
+                best_idxs = [0]
                 for i in range(1, len(chart[key])):
-                    if chart[key][i][3] > chart[key][best_idx][3]:
-                        best_idx = i
+                    if chart[key][i][3] > chart[key][best_idxs[0]][3]:
+                        best_idxs = [i]
+                    elif np.isclose(chart[key][i][3], chart[key][best_idxs[0]][3]):
+                        best_idxs.append(i)
+                if debug:
+                    print "\tnum roots tied for best: " + str(len(best_idxs))
+                best_idx = random.choice(best_idxs)
                 best = chart[key][best_idx][:]
 
                 # build and return tree from this root
@@ -1635,78 +1683,106 @@ class CKYParser:
         if debug:
             print "performing Merge with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True)+"'"
 
-        and_idx = self.ontology.preds.index('and')
+        # Renumerate both a and b to ensure matching lambda ordering.
+        a = copy.deepcopy(a)
+        b = copy.deepcopy(b)
+        a.renumerate_lambdas([])
+        b.renumerate_lambdas([])
+        if debug:
+            print "... renumerated to '" + self.print_parse(a) + "' and '" + self.print_parse(b) + "'"
 
-        if a.is_lambda_instantiation:
+        # If a and b are identical, the merger just returns a.
+        # We don't need to check syntax since once perform_merge is called we've ensured a, b can be merged.
+        if a.equal_allowing_commutativity(b, self.ontology):
             ab = copy.deepcopy(a)
-            ab.set_category(a.category)
-            innermost_outer_lambda = ab
-            a_child = a.children[0]
-            b_child = b.children[0]
-            while (innermost_outer_lambda.children is not None and innermost_outer_lambda.children[0].is_lambda
-                   and innermost_outer_lambda.children[0].is_lambda_instantiation):
-                innermost_outer_lambda = innermost_outer_lambda.children[0]
+
+        # If a and b are headed by predicate p and have lambda instantiations as children,
+        # e.g. "a_i(lambda x.(p(x))" and "a_i(lambda y.(q(y))", we should generate
+        # "a_i(and(lambda x.(p(x), q(x))))" rather than joining a_i's below the 'and'.
+        elif (not a.is_lambda and a.children is not None and
+                len(a.children) == 1 and a.children[0].is_lambda_instantiation and
+                not b.is_lambda and b.children is not None and
+                    len(b.children) == 1 and b.children[0].is_lambda_instantiation):
+            merged_children = self.perform_merge(a.children[0], b.children[0])
+            ab = SemanticNode.SemanticNode(None, a.type, a.category, False, idx=a.idx, children=[merged_children])
+            merged_children.parent = ab
+
+        # Otherwise, we need to nest a and b under an 'and', abstracting header lambdas as appropriate.
+        else:
+
+            and_idx = self.ontology.preds.index('and')
+
+            if a.is_lambda_instantiation:
+                ab = copy.deepcopy(a)
+                ab.set_category(a.category)
+                innermost_outer_lambda = ab
                 a_child = a.children[0]
                 b_child = b.children[0]
-            innermost_outer_lambda.children = [
-                SemanticNode.SemanticNode(innermost_outer_lambda, self.ontology.entries[and_idx],
-                                          innermost_outer_lambda.children[0].category, False, idx=and_idx)]
-            innermost_outer_lambda.children[0].children = [copy.deepcopy(a_child), copy.deepcopy(b_child)]
+                while (innermost_outer_lambda.children is not None and innermost_outer_lambda.children[0].is_lambda
+                       and innermost_outer_lambda.children[0].is_lambda_instantiation):
+                    innermost_outer_lambda = innermost_outer_lambda.children[0]
+                    a_child = a.children[0]
+                    b_child = b.children[0]
+                innermost_outer_lambda.children = [
+                    SemanticNode.SemanticNode(innermost_outer_lambda, self.ontology.entries[and_idx],
+                                              innermost_outer_lambda.children[0].category, False, idx=and_idx)]
+                innermost_outer_lambda.children[0].children = [copy.deepcopy(a_child), copy.deepcopy(b_child)]
 
-            # 'and' adopts type taking each child's and returning the same
-            a_child.set_return_type(self.ontology)
-            a_child.set_return_type(self.ontology)
-            input_type = [a_child.return_type, a_child.return_type]
-            if input_type not in self.ontology.types:
-                self.ontology.types.append(input_type)
-            full_type = [a_child.return_type, self.ontology.types.index(input_type)]
-            if full_type not in self.ontology.types:
-                self.ontology.types.append(full_type)
-            innermost_outer_lambda.children[0].type = self.ontology.types.index(full_type)
-            innermost_outer_lambda.children[0].set_return_type(self.ontology)
-            innermost_outer_lambda.children[0].children[0].parent = innermost_outer_lambda.children[0]
-            innermost_outer_lambda.children[0].children[1].parent = innermost_outer_lambda.children[0]
+                # 'and' adopts type taking each child's and returning the same
+                a_child.set_return_type(self.ontology)
+                a_child.set_return_type(self.ontology)
+                input_type = [a_child.return_type, a_child.return_type]
+                if input_type not in self.ontology.types:
+                    self.ontology.types.append(input_type)
+                full_type = [a_child.return_type, self.ontology.types.index(input_type)]
+                if full_type not in self.ontology.types:
+                    self.ontology.types.append(full_type)
+                innermost_outer_lambda.children[0].type = self.ontology.types.index(full_type)
+                innermost_outer_lambda.children[0].set_return_type(self.ontology)
+                innermost_outer_lambda.children[0].children[0].parent = innermost_outer_lambda.children[0]
+                innermost_outer_lambda.children[0].children[1].parent = innermost_outer_lambda.children[0]
 
-            ab.set_return_type(self.ontology)
-            ab.commutative_raise_node(self.ontology)
+                ab.set_return_type(self.ontology)
+                ab.commutative_raise_node(self.ontology)
 
-            # Check whether we've duplicated lambda instantiations among children and remove one if so.
-            # This seems kind of kludgy but should handle adjectives being merged.
-            if len(ab.children) == 1 and ab.children[0].idx == and_idx:
-                if [c.lambda_name for c in ab.children[0].children].count(ab.lambda_name) > 1:
-                    for cidx in range(len(ab.children[0].children)):
-                        if ab.children[0].children[cidx].lambda_name == ab.lambda_name:
-                            del ab.children[0].children[cidx]
-                            break
-            ab.set_return_type(self.ontology)
-        else:
-            try:
-                a.set_return_type(self.ontology)
-                b.set_return_type(self.ontology)
-            except TypeError:
-                raise TypeError("Non-matching child/parent relationship for one of two nodes " +
-                                self.print_parse(a, True) + " , " + self.print_parse(b, True))
-            if a.return_type != b.return_type:
-                raise RuntimeError("performing Merge with '"+self.print_parse(a, True) +
-                                   "' taking '"+self.print_parse(a, True) +
-                                   "' generated mismatched return types" +
-                                   self.ontology.compose_str_from_type(a.return_type)+"," +
-                                   self.ontology.compose_str_from_type(b.return_type))
-            input_type = [a.return_type, a.return_type]
-            if input_type not in self.ontology.types:
-                self.ontology.types.append(input_type)
-            full_type = [a.return_type, self.ontology.types.index(input_type)]
-            if full_type not in self.ontology.types:
-                self.ontology.types.append(full_type)
-            ab = SemanticNode.SemanticNode(None, self.ontology.types.index(full_type),
-                                           a.category, False, idx=and_idx)
-            ab.children = [copy.deepcopy(a), copy.deepcopy(b)]
-            ab.children[0].parent = ab
-            ab.children[1].parent = ab
+                # Check whether we've duplicated lambda instantiations among children and remove one if so.
+                # This seems kind of kludgy but should handle adjectives being merged.
+                if len(ab.children) == 1 and ab.children[0].idx == and_idx:
+                    if [c.lambda_name for c in ab.children[0].children].count(ab.lambda_name) > 1:
+                        for cidx in range(len(ab.children[0].children)):
+                            if ab.children[0].children[cidx].lambda_name == ab.lambda_name:
+                                del ab.children[0].children[cidx]
+                                break
+                ab.set_return_type(self.ontology)
+            else:
+                try:
+                    a.set_return_type(self.ontology)
+                    b.set_return_type(self.ontology)
+                except TypeError:
+                    raise TypeError("Non-matching child/parent relationship for one of two nodes " +
+                                    self.print_parse(a, True) + " , " + self.print_parse(b, True))
+                if a.return_type != b.return_type:
+                    raise RuntimeError("performing Merge with '"+self.print_parse(a, True) +
+                                       "' taking '"+self.print_parse(a, True) +
+                                       "' generated mismatched return types" +
+                                       self.ontology.compose_str_from_type(a.return_type)+"," +
+                                       self.ontology.compose_str_from_type(b.return_type))
+                input_type = [a.return_type, a.return_type]
+                if input_type not in self.ontology.types:
+                    self.ontology.types.append(input_type)
+                full_type = [a.return_type, self.ontology.types.index(input_type)]
+                if full_type not in self.ontology.types:
+                    self.ontology.types.append(full_type)
+                ab = SemanticNode.SemanticNode(None, self.ontology.types.index(full_type),
+                                               a.category, False, idx=and_idx)
+                ab.children = [copy.deepcopy(a), copy.deepcopy(b)]
+                ab.children[0].parent = ab
+                ab.children[1].parent = ab
 
-            ab.set_return_type(self.ontology)
-            ab.commutative_raise_node(self.ontology)
+                ab.set_return_type(self.ontology)
+                ab.commutative_raise_node(self.ontology)
 
+        ab.renumerate_lambdas([])
         if debug:
             print "performed Merge with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True) + \
                 "' to form '"+self.print_parse(ab, True)+"'"  # DEBUG
@@ -1755,6 +1831,8 @@ class CKYParser:
             if not b.validate_tree_structure():  # DEBUG
                 raise RuntimeError("WARNING: got invalidly linked node '"+self.print_parse(b)+"'")
         if debug:
+            if top_level_call:
+                print "\ntop level call"
             print "performing FA with '"+self.print_parse(a, True)+"' taking '"+self.print_parse(b, True)+"'"  # DEBUG
 
         # Increment B's lambdas, if any, by the max of A's lambdas, to prevent namespace collisions.
@@ -1876,29 +1954,34 @@ class CKYParser:
                                 if debug:
                                     print "B_new_arg: "+self.print_parse(b_new_arg)  # DEBUG
                                 for _c in b_new_arg.children:
-                                    if (_c.children is not None and _c.children[0].is_lambda and
-                                            not _c.children[0].is_lambda_instantiation):
-                                        lambda_instance_unscoped = True
-                                        p = _c.parent
-                                        while p is not None:
-                                            if (p.is_lambda_instantiation and
-                                                    p.lambda_name == _c.children[0].lambda_name):
-                                                lambda_instance_unscoped = False
-                                                break
-                                            else:
-                                                p = p.parent
-                                        if lambda_instance_unscoped:
-                                            if debug:
-                                                print "found unscoped lambda " + str(_c.children[0].lambda_name)
-                                            _c.children[0].lambda_name = scoping_parent_lambda
-                                            if debug:
-                                                print ("changed to scoping 'and' parent lambda " +
-                                                       str(scoping_parent_lambda))
+                                    if _c.children is not None:
+                                        for __c in _c.children:
+                                            if __c.is_lambda and not __c.is_lambda_instantiation:
+                                                lambda_instance_unscoped = True
+                                                p = _c.parent
+                                                while p is not None:
+                                                    if (p.is_lambda_instantiation and
+                                                            p.lambda_name == __c.lambda_name):
+                                                        lambda_instance_unscoped = False
+                                                        break
+                                                    else:
+                                                        p = p.parent
+                                                if lambda_instance_unscoped:
+                                                    if debug:
+                                                        print "found unscoped lambda " + str(__c.lambda_name)
+                                                    __c.lambda_name = scoping_parent_lambda
+                                                    if debug:
+                                                        print ("changed to scoping 'and' parent lambda " +
+                                                               str(scoping_parent_lambda))
                                 b_new_arg = b_new_arg.children[0]
                             if debug:
                                 print ("setting possible_parent_inst lambda name to child of " +
                                        self.print_parse(b_new_arg))
-                            possible_parent_inst.lambda_name = b_new_arg.children[0].lambda_name
+                            for c in b_new_arg.children:
+                                if c.is_lambda and not c.is_lambda_instantiation:
+                                    possible_parent_inst.lambda_name = c.lambda_name
+                            if debug:
+                                print ("possible_parent_inst lambda name: " + str(possible_parent_inst.lambda_name))
                             break
                         else:
                             possible_parent_inst = possible_parent_inst.parent
@@ -2091,6 +2174,8 @@ class CKYParser:
         return valid_through_children
 
     # return A,B from A<>B; A<>B must be AND headed and its lambda headers will be distributed to A, B
+    # TODO: this split and its helper function don't account for X -> X, X
+    # #TODO: or a(lambda(and(...))) -> a(lambda(...)), a(lambda(...))
     def perform_split(self, ab):
         # print "performing Split with '"+self.print_parse(ab, True)+"'" #DEBUG
 

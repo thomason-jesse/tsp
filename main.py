@@ -19,6 +19,7 @@ def main():
     lexicon_embeddings = FLAGS_lexicon_embeddings
     max_epochs = FLAGS_max_epochs
     epochs_between_validations = FLAGS_epochs_between_validations
+    lexicon_weight = FLAGS_lexicon_weight
     allow_merge = True if FLAGS_allow_merge == 1 else False
     perform_type_raising = True if FLAGS_perform_type_raising == 1 else False
     verbose = FLAGS_verbose
@@ -27,35 +28,39 @@ def main():
     condor_script_dir = FLAGS_condor_script_dir
     assert validation_pairs_fn is None or max_epochs >= epochs_between_validations
     assert not use_condor or (condor_target_dir is not None and condor_script_dir is not None)
+    assert max_epochs >= 0 or train_pairs_fn is not None
 
     o = Ontology.Ontology(ontology_fn)
     l = Lexicon.Lexicon(o, lexicon_fn, word_embeddings_fn=lexicon_embeddings,)
     p = CKYParser.CKYParser(o, l, allow_merge=allow_merge,
-                            lexicon_weight=1.0, perform_type_raising=perform_type_raising)
+                            lexicon_weight=lexicon_weight,
+                            perform_type_raising=perform_type_raising)
 
     # hyperparameter adjustments
     p.max_multiword_expression = 1
     p.max_missing_words_to_try = 0  # basically disallows polysemy that isn't already present in lexicon
 
     # Train the parser one epoch at a time, examining validation performance between each epoch.
-    train_data = p.read_in_paired_utterance_semantics(train_pairs_fn)
-    val_data = p.read_in_paired_utterance_semantics(validation_pairs_fn) if validation_pairs_fn is not None else None
-    print "finished instantiating parser; beginning training"
-    for epoch in range(0, max_epochs, epochs_between_validations):
+    if max_epochs > 0:
+        train_data = p.read_in_paired_utterance_semantics(train_pairs_fn)
+        val_data = p.read_in_paired_utterance_semantics(validation_pairs_fn) \
+            if validation_pairs_fn is not None else None
+        print "finished instantiating parser; beginning training"
+        for epoch in range(0, max_epochs, epochs_between_validations):
+            if val_data is not None:
+                acc_at_1 = get_performance_on_pairs(p, val_data)
+                print "validation accuracy at 1 for epoch " + str(epoch) + ": " + str(acc_at_1)
+            converged = p.train_learner_on_semantic_forms(train_data, epochs=epochs_between_validations,
+                                                          epoch_offset=epoch, reranker_beam=1,
+                                                          verbose=verbose,
+                                                          use_condor=use_condor, condor_target_dir=condor_target_dir,
+                                                          condor_script_dir=condor_script_dir)
+            if converged:
+                print "training converged after epoch " + str(epoch)
+                break
         if val_data is not None:
             acc_at_1 = get_performance_on_pairs(p, val_data)
-            print "validation accuracy at 1 for epoch " + str(epoch) + ": " + str(acc_at_1)
-        converged = p.train_learner_on_semantic_forms(train_data, epochs=epochs_between_validations,
-                                                      epoch_offset=epoch, reranker_beam=1,
-                                                      verbose=verbose,
-                                                      use_condor=use_condor, condor_target_dir=condor_target_dir,
-                                                      condor_script_dir=condor_script_dir)
-        if converged:
-            print "training converged after epoch " + str(epoch)
-            break
-    if val_data is not None:
-        acc_at_1 = get_performance_on_pairs(p, val_data)
-        print "validation accuracy at 1 at training stop: " + str(acc_at_1)
+            print "validation accuracy at 1 at training stop: " + str(acc_at_1)
 
     # Write the parser to file.
     print "writing trained parser to file..."
@@ -80,7 +85,7 @@ if __name__ == '__main__':
                         help="the parser ontology text file")
     parser.add_argument('--lexicon_fn', type=str, required=True,
                         help="the parser lexicon text file")
-    parser.add_argument('--train_pairs_fn', type=str, required=True,
+    parser.add_argument('--train_pairs_fn', type=str, required=False,
                         help="pairs of sentence and gold semantic forms on which to train parser")
     parser.add_argument('--model_fn', type=str, required=True,
                         help="output filename for the trained parser model")
@@ -92,6 +97,8 @@ if __name__ == '__main__':
                         help="maximum epochs to iterate over the training data")
     parser.add_argument('--epochs_between_validations', type=int, required=False, default=1,
                         help="how many epochs to run between validation tests")
+    parser.add_argument('--lexicon_weight', type=float, required=False, default=1.0,
+                        help="the initial count given to rules read from the lexicon")
     parser.add_argument('--allow_merge', type=int, required=False, default=1,
                         help="whether to allow the parser to use the merge operation")
     parser.add_argument('--perform_type_raising', type=int, required=False, default=1,
