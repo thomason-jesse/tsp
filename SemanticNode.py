@@ -40,11 +40,11 @@ class SemanticNode:
             child_return_type_str = ontology.compose_str_from_type(self.children[0].return_type)
             self.return_type = ontology.read_type_from_str("<" + type_str + "," + child_return_type_str + ">")
             if debug:
-                print "set_return_type: lambda instantiation set return"
+                print("set_return_type: lambda instantiation set return")
         elif self.children is None:
             self.return_type = self.type  # leaf returns itself
             if debug:
-                print "set_return_type: leaf set return"
+                print("set_return_type: leaf set return")
         else:
             candidate_type = self.type
             for c in self.children:
@@ -58,7 +58,7 @@ class SemanticNode:
                                     self.print_little() + ")")
             self.return_type = candidate_type
             if debug:
-                print "set_return_type: set return by consuming children"
+                print("set_return_type: set return by consuming children")
 
     # copy attributes of the given SemanticNode into this one (essentially, clone the second into this space)
     def copy_attributes(self, a, lambda_enumeration=0, lambda_map=None, preserve_parent=False, preserve_children=False):
@@ -106,8 +106,8 @@ class SemanticNode:
             return True
         for idx in range(0, len(self.children)):
             if self.children[idx].parent != self:
-                print "child "+str(idx)+" of "+str(self.children[idx]) + \
-                      " has non-matching parent "+str(self.children[idx].parent)  # DEBUG
+                print("child "+str(idx)+" of "+str(self.children[idx]) +
+                      " has non-matching parent "+str(self.children[idx].parent))  # DEBUG
                 return False
             if not self.children[idx].validate_tree_structure():
                 return False
@@ -132,17 +132,17 @@ class SemanticNode:
         a.commutative_raise_node(ontology)
         b.commutative_raise_node(ontology)
 
-        if debug:
-            print a
-            if a.children is not None:  # DEBUG
-                print '\t' + str([str(c) for c in a.children])  # DEBUG
-                if a.children[0].children is not None:
-                    print '\t\t' + str([str(c) for c in a.children[0].children])  # DEBUG
-            print b
-            if b.children is not None:  # DEBUG
-                print '\t' + str([str(c) for c in b.children])  # DEBUG
-                if b.children[0].children is not None:
-                    print '\t\t' + str([str(c) for c in b.children[0].children])  # DEBUG
+        # if debug:
+        #     print(a)
+        #     if a.children is not None:  # DEBUG
+        #         print('\t' + str([str(c) for c in a.children]))  # DEBUG
+        #         if a.children[0].children is not None:
+        #             print '\t\t' + str([str(c) for c in a.children[0].children])  # DEBUG
+        #     print(b)
+        #     if b.children is not None:  # DEBUG
+        #         print '\t' + str([str(c) for c in b.children])  # DEBUG
+        #         if b.children[0].children is not None:
+        #             print '\t\t' + str([str(c) for c in b.children[0].children])  # DEBUG
 
         return a.equal_ignoring_syntax(b, ignore_syntax=ignore_syntax)
 
