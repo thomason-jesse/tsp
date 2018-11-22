@@ -16,7 +16,8 @@ random.seed(4)
 
 
 class Parameters:
-    def __init__(self, ont, lex, allow_merge, use_language_model=False, lexicon_weight=1.0):
+    def __init__(self, ont, lex, allow_merge,
+                 use_language_model=False, lexicon_weight=1.0):
         debug = False
 
         self.ontology = ont
@@ -783,7 +784,9 @@ class CKYParser:
     # if the root of the tree is known (during supervised training, for example),
     # providing it as an argument to this method allows top-down generation
     # to find new lexical entries for surface forms not yet recognized
-    def most_likely_cky_parse(self, s, reranker_beam=1, known_root=None, reverse_fa_beam=None, debug=False):
+    def most_likely_cky_parse(self, s, reranker_beam=1, known_root=None, reverse_fa_beam=None,
+                              timeout=None, debug=False):
+        # TODO: implement timeout
         s = s.strip()
         if len(s) == 0:
             raise AssertionError("Cannot parse provided string of length zero")
