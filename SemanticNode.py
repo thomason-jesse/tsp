@@ -157,7 +157,7 @@ class SemanticNode:
                         new_c.extend(self.commutative_raise(c, curr.idx))
                     for nc in new_c:
                         nc.parent = curr
-                    new_c = sorted(new_c, key=lambda node: node.idx)
+                    new_c = sorted(new_c, key=lambda node: node.idx if node.idx is not None else 0)
                     curr.children = new_c
                     if ontology.preds[curr.idx] == 'and':  # TODO: this is vestigial and gross; should work around it
                         curr.set_type_from_children_return_types(curr.children[0].return_type, ontology)

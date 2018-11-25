@@ -1405,7 +1405,7 @@ class CKYParser:
                 if len(semantic_candidates[idx]) == 0:
                     assignments.append(None)  # no known semantic assignment
                 else:
-                    assignment_idx = curr % len(semantic_candidates[idx])
+                    assignment_idx = int(curr % len(semantic_candidates[idx]))
                     assignments.append(assignment_idx)
                     if expressions[idx] in self.lexicon.surface_forms:  # surface form is in lexicon
                         key = (semantic_candidates[idx][assignment_idx],
@@ -1461,7 +1461,7 @@ class CKYParser:
         # for this at any idx, ignore that idx's lexicon definitions to allow top-down generation
         # do the subsequent part in randomized order such that if a sentence can't be parsed, we try again
         # allowing each word in turn to take on a new generation-based word sense
-        randomized_idxs = range(len(tks))
+        randomized_idxs = list(range(len(tks)))
         random.shuffle(randomized_idxs)
         randomized_idxs = [-1] + randomized_idxs
         missing_tried_so_far = 0
