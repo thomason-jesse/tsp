@@ -17,7 +17,8 @@ random.seed(4)
 
 
 class Parameters:
-    def __init__(self, ont, lex, allow_merge, use_language_model=False, lexicon_weight=1.0):
+    def __init__(self, ont, lex, allow_merge,
+                 use_language_model=False, lexicon_weight=1.0):
         debug = False
 
         self.ontology = ont
