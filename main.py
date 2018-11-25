@@ -45,7 +45,7 @@ def main():
         train_data = p.read_in_paired_utterance_semantics(train_pairs_fn)
         val_data = p.read_in_paired_utterance_semantics(validation_pairs_fn) \
             if validation_pairs_fn is not None else None
-        print "finished instantiating parser; beginning training"
+        print"finished instantiating parser; beginning training"
         for epoch in range(0, max_epochs, epochs_between_validations):
             if val_data is not None:
                 acc_at_1 = get_performance_on_pairs(p, val_data)
