@@ -88,7 +88,7 @@ def main():
                 try:
                     with open(err_fn) as f:
                         err_text = f.read()
-                        if len(err_text.strip()) > 0:
+                        if len(err_text.strip()) > 0 and 'FutureWarning' not in err_text:
 
                             # Error, so move on and save log.
                             print ("_condor_get_training_pairs: discovered failed job for pair idx " +
