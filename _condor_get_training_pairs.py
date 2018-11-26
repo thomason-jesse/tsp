@@ -33,7 +33,7 @@ def main():
         out_fn = os.path.join(target_dir, "temp.pair." + str(idx) + ".pickle")
         log_fn = os.path.join(target_dir, "temp.pair." + str(idx) + ".log")
         cmd = (condorify_fn + " " +
-               "python " + script_fn +
+               "python3 " + script_fn +
                " --parser_infile " + parser_infile +
                " --pairs_infile " + pairs_infile +
                " --pair_idx " + str(idx) +

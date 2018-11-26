@@ -695,7 +695,7 @@ class CKYParser:
                 pickle.dump(d, f)
             pairs_out_fn = os.path.join(condor_target_dir, "temp.pairs.out.pickle")
             script_fn = os.path.join(condor_script_dir, "_condor_get_training_pairs.py")
-            cmd = ("python " + script_fn +
+            cmd = ("python3 " + script_fn +
                    " --target_dir " + condor_target_dir +
                    " --script_dir " + condor_script_dir +
                    " --parser_infile " + parser_fn +

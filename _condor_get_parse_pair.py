@@ -49,7 +49,7 @@ def main():
     match = False
     first = True
     if chosen_parse is None:
-        print "WARNING: could not find valid parse for '" + x + "' during training"  # DEBUG
+        print("WARNING: could not find valid parse for '" + x + "' during training")  # DEBUG
         num_fails += 1
     else:
         while correct_parse is None and current_parse is not None:
@@ -67,29 +67,29 @@ def main():
             current_parse, correct_score, current_new_lexicon_entries, current_skipped_surface_forms = \
                 next(cky_parse_generator)
         if correct_parse is None:
-            print "WARNING: could not find correct parse for '"+str(x)+"' during training"
+            print("WARNING: could not find correct parse for '"+str(x)+"' during training")
             num_fails += 1
         else:
-            print "\tx: "+str(x)  # DEBUG
-            print "\t\tchosen_parse: "+p.print_parse(chosen_parse.node, show_category=True)  # DEBUG
-            print "\t\tchosen_score: "+str(chosen_score)  # DEBUG
-            print "\t\tchosen_skips: "+str(chosen_skipped_surface_forms)  # DEBUG
+            print("\tx: "+str(x))  # DEBUG
+            print("\t\tchosen_parse: "+p.print_parse(chosen_parse.node, show_category=True))  # DEBUG
+            print("\t\tchosen_score: "+str(chosen_score))  # DEBUG
+            print("\t\tchosen_skips: "+str(chosen_skipped_surface_forms))  # DEBUG
             if len(chosen_new_lexicon_entries) > 0:  # DEBUG
-                print "\t\tchosen_new_lexicon_entries: "  # DEBUG
+                print("\t\tchosen_new_lexicon_entries: ")  # DEBUG
                 for sf, sem in chosen_new_lexicon_entries:  # DEBUG
-                    print "\t\t\t'"+sf+"' :- "+p.print_parse(sem, show_category=True)  # DEBUG
+                    print("\t\t\t'"+sf+"' :- "+p.print_parse(sem, show_category=True))  # DEBUG
             if not match or len(correct_new_lexicon_entries) > 0:
                 if len(correct_new_lexicon_entries) > 0:
                     num_genlex_only += 1
-                print "\t\ttraining example generated:"  # DEBUG
-                print "\t\t\tcorrect_parse: "+p.print_parse(correct_parse.node, show_category=True)  # DEBUG
-                print "\t\t\tcorrect_score: "+str(correct_score)  # DEBUG
-                print "\t\t\tcorrect_skips: " + str(correct_skipped_surface_forms)  # DEBUG
+                print("\t\ttraining example generated:")  # DEBUG
+                print("\t\t\tcorrect_parse: "+p.print_parse(correct_parse.node, show_category=True))  # DEBUG
+                print("\t\t\tcorrect_score: "+str(correct_score))  # DEBUG
+                print("\t\t\tcorrect_skips: " + str(correct_skipped_surface_forms))  # DEBUG
                 if len(correct_new_lexicon_entries) > 0:  # DEBUG
-                    print "\t\t\tcorrect_new_lexicon_entries: "  # DEBUG
+                    print("\t\t\tcorrect_new_lexicon_entries: ")  # DEBUG
                     for sf, sem in correct_new_lexicon_entries:  # DEBUG
-                        print "\t\t\t\t'"+sf+"' :- "+p.print_parse(sem, show_category=True)  # DEBUG
-                print "\t\t\ty: "+p.print_parse(y, show_category=True)  # DEBUG
+                        print("\t\t\t\t'"+sf+"' :- "+p.print_parse(sem, show_category=True))  # DEBUG
+                print("\t\t\ty: "+p.print_parse(y, show_category=True))  # DEBUG
 
     # Output relevant data in results structure.
     result = {'num_trainable': num_trainable, 'num_matches': num_matches, 'num_fails': num_fails, 'num_genlex_only': num_genlex_only,
