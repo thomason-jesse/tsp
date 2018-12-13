@@ -778,10 +778,10 @@ class CKYParser:
                               chosen_skipped_surface_forms, correct_skipped_surface_forms])
 
         if verbose >= 1:
-            print("\tmatched "+str(num_matches)+"/"+str(len(d)))  # DEBUG
-            print("\ttrained "+str(num_trainable)+"/"+str(len(d)))  # DEBUG
-            print("\tgenlex only "+str(num_genlex_only)+"/"+str(len(d)))  # DEBUG
-            print("\tfailed "+str(num_fails)+"/"+str(len(d)))  # DEBUG
+            print("\tmatched "+str(num_matches)+"/"+str(len(d)) + " (%.2f" % (num_matches / float(len(d))) + ")")  # DEBUG
+            print("\ttrained "+str(num_trainable)+"/"+str(len(d)) + " (%.2f" % (num_trainable / float(len(d))) + ")")  # DEBUG
+            print("\tgenlex only "+str(num_genlex_only)+"/"+str(len(d))+ " (%.2f" % (num_genlex_only / float(len(d))) + ")")  # DEBUG
+            print("\tfailed "+str(num_fails)+"/"+str(len(d))+ " (%.2f" % (num_fails / float(len(d))) + ")")  # DEBUG
         return t, num_fails
 
     # yields the next most likely CKY parse of input string s
